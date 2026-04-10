@@ -1003,8 +1003,9 @@ function doFile(f,extra){
         try{
           const bytes=new Uint8Array(buf);
           // Chunked base64 encoding to handle large files without stack overflow
-          let b64='';const chunk=8192;
-          for(let i=0;i<bytes.length;i+=chunk){b64+=btoa(String.fromCharCode(...bytes.subarray(i,i+chunk)));}
+          // Chunk size MUST be a multiple of 3 so btoa doesn't add padding mid-string
+          let b64='';const chunk=8190;
+          for(let i=0;i<bytes.length;i+=chunk){b64+=btoa(String.fromCharCode(...bytes.subarray(i,Math.min(i+chunk,bytes.length))));}
           const email=localStorage.getItem('angies_auth_email')||'unknown@angies.com';
           const body=JSON.stringify({"0":{json:{filename:f.name,fileBase64:b64,periodKey:d.key||null,uploadedBy:email}}});
           const res=await fetch('/api/trpc/report.upload?batch=1',{method:'POST',headers:{'Content-Type':'application/json'},body});
@@ -1527,7 +1528,9 @@ function showDash(){
   document.getElementById('lastUpd').textContent='Updated '+now.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
   document.getElementById('lastUpd').classList.remove('hid');
   document.getElementById('hdrSub').textContent=Object.keys(APP.monthly).join(' · ')+' — Daily Reporting';
-  buildPerTabs();buildLocSel();buildWkPills();setupListeners();update();
+  buildPerTabs();buildLocSel();buildWkPills();
+  if(!APP._listenersReady){setupListeners();APP._listenersReady=true;}
+  update();
 }
 
 function getPD(){return APP.monthly[APP.period]||{}}
@@ -3596,11 +3599,14 @@ async function loadSharedReports() {
         const fileRes = await fetch(row.fileUrl);
         const buf = await fileRes.arrayBuffer();
         const wb = XLSX.read(new Uint8Array(buf), { type: 'array', cellDates: false, cellNF: true, cellStyles: false });
-        const d = parseWB(wb, (row.fileKey || '').split('/').pop() || row.fileKey);
+        const fname = (row.fileKey || '').split('/').pop() || row.fileKey;
+        const d = parseWB(wb, fname);
         d._v = PARSE_VER;
         APP.monthly[d.key] = d;
         _mergeStoreNums(d);
         if (!APP.period) APP.period = d.key;
+        // Cache to IndexedDB so shared reports persist across reloads without re-downloading
+        dbSave(d.key, buf, fname, d).catch(()=>{});
       } catch (err) { console.warn('[Manus] Failed to load shared report', row.fileKey, err); }
     }
     if (Object.keys(APP.monthly).length) showDash();
