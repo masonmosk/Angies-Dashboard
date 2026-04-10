@@ -998,22 +998,28 @@ function doFile(f,extra){
       dbSave(d.key,buf,f.name,d)
         .then(()=>updDBBadge(new Date().toISOString()))
         .catch(err=>console.warn('DB save failed',err));
-      // ── Manus server sync: upload to shared backend (only if backend available) ──
+      // ── Manus server sync: upload to shared backend ──
       (async()=>{
         try{
-          if(!await _checkManus())return; // no backend — skip silently
+          showToast('☁ Syncing to shared storage…',10000);
           const bytes=new Uint8Array(buf);
-          // Chunked base64 encoding to handle large files without stack overflow
-          // Chunk size MUST be a multiple of 3 so btoa doesn't add padding mid-string
           let b64='';const chunk=8190;
           for(let i=0;i<bytes.length;i+=chunk){b64+=btoa(String.fromCharCode(...bytes.subarray(i,Math.min(i+chunk,bytes.length))));}
           const email=localStorage.getItem('angies_auth_email')||'unknown@angies.com';
           const body=JSON.stringify({"0":{json:{filename:f.name,fileBase64:b64,periodKey:d.key||null,uploadedBy:email}}});
           const res=await fetch('/api/trpc/report.upload?batch=1',{method:'POST',headers:{'Content-Type':'application/json'},body});
           const json=await res.json();
-          if(json[0]&&json[0].result){console.log('[Manus] Uploaded to shared storage:',json[0].result.data.json.fileKey);}
-          else{console.warn('[Manus] Upload unexpected response:',json);}
-        }catch(err){console.warn('[Manus] Server upload failed (local-only fallback):',err);}
+          if(json[0]&&json[0].result&&json[0].result.data){
+            showToast('☁ Synced — all users can now see this report.',6000);
+            console.log('[Manus] Uploaded:',json[0].result.data.json.fileKey);
+          } else {
+            showToast('⚠ Sync failed — data saved locally only.',6000);
+            console.warn('[Manus] Upload unexpected response:',json);
+          }
+        }catch(err){
+          showToast('⚠ Sync error — data saved locally only.',6000);
+          console.warn('[Manus] Server upload failed:',err);
+        }
       })();
     }catch(err){console.error(err);alert('Parse error: '+err.message)}
     setLD(0);
@@ -3584,60 +3590,43 @@ function exportTableToXLSX(){
 // ──────────────────────────────────────────────────────────────────────────────
 
 // Auto-load saved data on page open — only after auth passes
-// initDB + loadSharedReports now handled above in doSignIn and page-load trigger
-
-
-// ── Manus backend detection ──
-// Only attempt server sync when a real API backend is running.
-// Detects by checking if the endpoint returns JSON (not HTML from a static server).
-let _manusCheck=null; // shared promise so concurrent callers wait on one fetch
-function _checkManus(){
-  if(!_manusCheck){
-    // Use a lightweight POST ping instead of GET — GET returns 204 on the CDN layer
-    _manusCheck=fetch('/api/trpc/report.list?batch=1&input=%7B%220%22%3A%7B%22json%22%3Anull%7D%7D')
-      .then(r=>r.json())
-      .then(j=>{const ok=Array.isArray(j)&&j[0]&&j[0].result!==undefined;if(!ok)console.warn('[Manus] Backend check failed — unexpected response');return ok;})
-      .catch(()=>{console.warn('[Manus] Backend not reachable — using local storage only.');return false;});
-  }
-  return _manusCheck;
-}
-
-let _sharedLoading=false; // prevent duplicate calls
-async function loadSharedReports() {
+// ── Manus shared backend ──────────────────────────────────────────────────
+let _sharedLoading=false;
+async function loadSharedReports(){
   if(_sharedLoading)return;
   _sharedLoading=true;
-  try {
-    if(!await _checkManus()){_sharedLoading=false;return;}
-    const res = await fetch('/api/trpc/report.list?batch=1&input=%7B%220%22%3A%7B%22json%22%3Anull%7D%7D');
-    const json = await res.json();
-    const rows = (json[0] && json[0].result && json[0].result.data && json[0].result.data.json) || [];
-    if (!rows.length){_sharedLoading=false;return;}
-    setLD(1, 'Loading shared reports…');
-    for (const row of rows) {
-      if (row.periodKey && APP.monthly[row.periodKey]) continue;
-      try {
-        const fileRes = await fetch(row.fileUrl);
-        const buf = await fileRes.arrayBuffer();
-        const wb = XLSX.read(new Uint8Array(buf), { type: 'array', cellDates: false, cellNF: true, cellStyles: false });
-        const fname = (row.fileKey || '').split('/').pop() || row.fileKey;
-        const d = parseWB(wb, fname);
-        d._v = PARSE_VER;
-        APP.monthly[d.key] = d;
+  try{
+    const res=await fetch('/api/trpc/report.list?batch=1&input=%7B%220%22%3A%7B%22json%22%3Anull%7D%7D');
+    if(!res.ok){console.warn('[Manus] report.list HTTP error:',res.status);_sharedLoading=false;return;}
+    const json=await res.json();
+    const rows=(json[0]&&json[0].result&&json[0].result.data&&json[0].result.data.json)||[];
+    if(!rows.length){_sharedLoading=false;return;}
+    setLD(1,'Loading shared reports…');
+    let loaded=0;
+    for(const row of rows){
+      if(row.periodKey&&APP.monthly[row.periodKey]){continue;}
+      try{
+        const fileRes=await fetch(row.fileUrl);
+        if(!fileRes.ok){console.warn('[Manus] Could not fetch file:',row.fileUrl,fileRes.status);continue;}
+        const buf=await fileRes.arrayBuffer();
+        const wb=XLSX.read(new Uint8Array(buf),{type:'array',cellDates:false,cellNF:true,cellStyles:false});
+        const fname=(row.fileKey||'').split('/').pop()||row.fileKey;
+        const d=parseWB(wb,fname);
+        d._v=PARSE_VER;
+        APP.monthly[d.key]=d;
         _mergeStoreNums(d);
-        if (!APP.period) APP.period = d.key;
-        // Cache to IndexedDB so shared reports persist across reloads without re-downloading
-        dbSave(d.key, buf, fname, d).catch(()=>{});
-      } catch (err) { console.warn('[Manus] Failed to load shared report', row.fileKey, err); }
+        if(!APP.period)APP.period=d.key;
+        dbSave(d.key,buf,fname,d).catch(()=>{});
+        loaded++;
+      }catch(err){console.warn('[Manus] Failed to load report',row.fileKey,err);}
     }
-    if (Object.keys(APP.monthly).length) showDash();
+    if(loaded>0&&Object.keys(APP.monthly).length){showDash();}
     setLD(0);
-    console.log('[Manus] Shared reports loaded:', rows.length);
-  } catch (err) { console.warn('[Manus] Could not fetch shared reports:', err); setLD(0); }
+    console.log('[Manus] Shared reports loaded:',loaded,'of',rows.length);
+  }catch(err){console.warn('[Manus] loadSharedReports error:',err);setLD(0);}
   _sharedLoading=false;
 }
-
-// If already signed in on page load, fetch shared reports too.
-if (checkAuth()) { initDB().then(()=>{ loadSharedReports(); }).catch(err=>{console.warn('initDB failed:',err); loadSharedReports();}); }
+// On sign-in and on page load (if already signed in), load shared reports after local DB restore
 </script>
 </body>
 </html>
