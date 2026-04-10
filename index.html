@@ -3593,9 +3593,11 @@ function exportTableToXLSX(){
 let _manusCheck=null; // shared promise so concurrent callers wait on one fetch
 function _checkManus(){
   if(!_manusCheck){
-    _manusCheck=fetch('/api/trpc/report.list?batch=1&input=%7B%220%22%3A%7B%22json%22%3Anull%7D%7D',{method:'GET'})
-      .then(r=>{const ok=(r.headers.get('content-type')||'').includes('application/json');if(!ok)console.log('[Manus] Backend not available — using local storage only.');return ok;})
-      .catch(()=>{console.log('[Manus] Backend not reachable — using local storage only.');return false;});
+    // Use a lightweight POST ping instead of GET — GET returns 204 on the CDN layer
+    _manusCheck=fetch('/api/trpc/report.list?batch=1&input=%7B%220%22%3A%7B%22json%22%3Anull%7D%7D')
+      .then(r=>r.json())
+      .then(j=>{const ok=Array.isArray(j)&&j[0]&&j[0].result!==undefined;if(!ok)console.warn('[Manus] Backend check failed — unexpected response');return ok;})
+      .catch(()=>{console.warn('[Manus] Backend not reachable — using local storage only.');return false;});
   }
   return _manusCheck;
 }
