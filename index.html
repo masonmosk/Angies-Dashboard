@@ -745,8 +745,8 @@ function doSignIn(){
   document.getElementById('signinOv').style.display='none';
   document.getElementById('hdrUser').textContent='👤 '+email;
   document.getElementById('btnSignOut').style.display='inline-block';
-  // Now that auth is confirmed, kick off data restore
-  initDB();
+  // Now that auth is confirmed, kick off data restore then load shared reports
+  initDB().then(()=>{ if(typeof loadSharedReports==='function') loadSharedReports(); }).catch(()=>{ if(typeof loadSharedReports==='function') loadSharedReports(); });
 }
 function doSignOut(){
   if(!confirm('Sign out? You will need to re-enter your @angies.com email to access the dashboard.'))return;
@@ -998,6 +998,21 @@ function doFile(f,extra){
       dbSave(d.key,buf,f.name,d)
         .then(()=>updDBBadge(new Date().toISOString()))
         .catch(err=>console.warn('DB save failed',err));
+      // ── Manus server sync: upload to shared backend ──
+      (async()=>{
+        try{
+          const bytes=new Uint8Array(buf);
+          // Chunked base64 encoding to handle large files without stack overflow
+          let b64='';const chunk=8192;
+          for(let i=0;i<bytes.length;i+=chunk){b64+=btoa(String.fromCharCode(...bytes.subarray(i,i+chunk)));}
+          const email=localStorage.getItem('angies_auth_email')||'unknown@angies.com';
+          const body=JSON.stringify({"0":{json:{filename:f.name,fileBase64:b64,periodKey:d.key||null,uploadedBy:email}}});
+          const res=await fetch('/api/trpc/report.upload?batch=1',{method:'POST',headers:{'Content-Type':'application/json'},body});
+          const json=await res.json();
+          if(json[0]&&json[0].result){console.log('[Manus] Uploaded to shared storage:',json[0].result.data.json.fileKey);}
+          else{console.warn('[Manus] Upload unexpected response:',json);}
+        }catch(err){console.warn('[Manus] Server upload failed (local-only fallback):',err);}
+      })();
     }catch(err){console.error(err);alert('Parse error: '+err.message)}
     setLD(0);
   };
@@ -3565,7 +3580,37 @@ function exportTableToXLSX(){
 // ──────────────────────────────────────────────────────────────────────────────
 
 // Auto-load saved data on page open — only after auth passes
-if(checkAuth())initDB();
+// initDB + loadSharedReports now handled above in doSignIn and page-load trigger
+
+
+async function loadSharedReports() {
+  try {
+    const res = await fetch('/api/trpc/report.list?batch=1&input=%7B%220%22%3A%7B%22json%22%3Anull%7D%7D');
+    const json = await res.json();
+    const rows = (json[0] && json[0].result && json[0].result.data && json[0].result.data.json) || [];
+    if (!rows.length) return;
+    setLD(1, 'Loading shared reports…');
+    for (const row of rows) {
+      if (row.periodKey && APP.monthly[row.periodKey]) continue;
+      try {
+        const fileRes = await fetch(row.fileUrl);
+        const buf = await fileRes.arrayBuffer();
+        const wb = XLSX.read(new Uint8Array(buf), { type: 'array', cellDates: false, cellNF: true, cellStyles: false });
+        const d = parseWB(wb, (row.fileKey || '').split('/').pop() || row.fileKey);
+        d._v = PARSE_VER;
+        APP.monthly[d.key] = d;
+        _mergeStoreNums(d);
+        if (!APP.period) APP.period = d.key;
+      } catch (err) { console.warn('[Manus] Failed to load shared report', row.fileKey, err); }
+    }
+    if (Object.keys(APP.monthly).length) showDash();
+    setLD(0);
+    console.log('[Manus] Shared reports loaded:', rows.length);
+  } catch (err) { console.warn('[Manus] Could not fetch shared reports:', err); setLD(0); }
+}
+
+// If already signed in on page load, fetch shared reports too.
+if (checkAuth()) { initDB().then(()=>{ if(typeof loadSharedReports==='function') loadSharedReports(); }).catch(()=>{ if(typeof loadSharedReports==='function') loadSharedReports(); }); }
 </script>
 </body>
 </html>
