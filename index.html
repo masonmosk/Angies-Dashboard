@@ -1674,13 +1674,14 @@ function buildWkPills(){
     const p=document.createElement('div');p.className='pill';p.dataset.w=w;
     p.textContent=w.replace('Week ','Wk ')+(sd?' ('+sd+')':'');c.appendChild(p);
   });
-  // Default to the most recent week that has actual sales data.
-  // Always use pd.all (AllStores) for detection — don't rely on APP.loc which may be store-specific.
-  const ld4wk=pd.all||{};
+  // Default to the week containing today's date. Fall back to latest week with data, then last week.
+  const _today=new Date();
   let activeWk=wks[wks.length-1]||'Week 1';
   for(let i=wks.length-1;i>=0;i--){
-    if(gv(ld4wk,wks[i],'acS','all')>0){activeWk=wks[i];break;}
+    const sd=pd.all&&pd.all[wks[i]]?pd.all[wks[i]].sd:'';
+    if(sd){const p=sd.split('-');if(p.length>=2){const mm=parseInt(p[0]),dd=parseInt(p[1]);const yr=mm<=6?_today.getFullYear():_today.getFullYear()-1;const wkStart=new Date(yr,mm-1,dd);const diff=(_today-wkStart)/(1000*60*60*24);if(diff>=0&&diff<7){activeWk=wks[i];break;}}}
   }
+  if(activeWk===wks[wks.length-1]){const ld4wk=pd.all||{};for(let i=wks.length-1;i>=0;i--){if(gv(ld4wk,wks[i],'acS','all')>0){activeWk=wks[i];break;}}}
   APP.week=activeWk;
   c.querySelectorAll('.pill').forEach(p=>p.classList.toggle('on',p.dataset.w===APP.week));
 }
@@ -1746,9 +1747,13 @@ function update(){
   if(!APP.week||!_validWks.includes(APP.week)){
     const _oldWk=APP.week;
     const _wks=_pd.weeks||[];
-    const _ld=_pd.all||{};
+    const _td=new Date();
     let _best=_wks[_wks.length-1]||null;
-    for(let _i=_wks.length-1;_i>=0;_i--){if(gv(_ld,_wks[_i],'acS','all')>0){_best=_wks[_i];break;}}
+    for(let _i=_wks.length-1;_i>=0;_i--){
+      const _sd=_pd.all&&_pd.all[_wks[_i]]?_pd.all[_wks[_i]].sd:'';
+      if(_sd){const _p=_sd.split('-');if(_p.length>=2){const _mm=parseInt(_p[0]),_dd=parseInt(_p[1]);const _yr=_mm<=6?_td.getFullYear():_td.getFullYear()-1;const _ws=new Date(_yr,_mm-1,_dd);const _df=(_td-_ws)/(864e5);if(_df>=0&&_df<7){_best=_wks[_i];break;}}}
+    }
+    if(_best===_wks[_wks.length-1]){const _ld=_pd.all||{};for(let _i=_wks.length-1;_i>=0;_i--){if(gv(_ld,_wks[_i],'acS','all')>0){_best=_wks[_i];break;}}}
     APP.week=_best;
     document.querySelectorAll('#wkPills .pill').forEach(p=>p.classList.toggle('on',p.dataset.w===APP.week));
     if(_oldWk&&_oldWk!==APP.week&&_oldWk!=='_period')showToast(`📅 Switched to <strong>${APP.week}</strong> — "${_oldWk}" not available in this period.`,4000);
