@@ -998,23 +998,24 @@ function doFile(f,extra){
       dbSave(d.key,buf,f.name,d)
         .then(()=>updDBBadge(new Date().toISOString()))
         .catch(err=>console.warn('DB save failed',err));
-      // ── Manus server sync: upload to shared backend ──
+      // ── Manus server sync: upload via multipart/form-data (no JSON size limits) ──
       (async()=>{
         try{
           showToast('☁ Syncing to shared storage…',10000);
-          const bytes=new Uint8Array(buf);
-          let b64='';const chunk=8190;
-          for(let i=0;i<bytes.length;i+=chunk){b64+=btoa(String.fromCharCode(...bytes.subarray(i,Math.min(i+chunk,bytes.length))));}
           const email=localStorage.getItem('angies_auth_email')||'unknown@angies.com';
-          const body=JSON.stringify({"0":{json:{filename:f.name,fileBase64:b64,periodKey:d.key||null,uploadedBy:email}}});
-          const res=await fetch('/api/trpc/report.upload?batch=1',{method:'POST',headers:{'Content-Type':'application/json'},body});
+          const blob=new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+          const fd=new FormData();
+          fd.append('file',blob,f.name);
+          fd.append('periodKey',d.key||'');
+          fd.append('uploadedBy',email);
+          const res=await fetch('/api/upload-report',{method:'POST',body:fd});
           const json=await res.json();
-          if(json[0]&&json[0].result&&json[0].result.data){
+          if(json.ok){
             showToast('☁ Synced — all users can now see this report.',6000);
-            console.log('[Manus] Uploaded:',json[0].result.data.json.fileKey);
+            console.log('[Manus] Uploaded:',json.fileKey);
           } else {
             showToast('⚠ Sync failed — data saved locally only.',6000);
-            console.warn('[Manus] Upload unexpected response:',json);
+            console.warn('[Manus] Upload error response:',json);
           }
         }catch(err){
           showToast('⚠ Sync error — data saved locally only.',6000);
