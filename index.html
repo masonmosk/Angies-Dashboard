@@ -667,7 +667,7 @@ const SS=['Baseline','Signal','QC','Ray','Pinnacle','Central','LoneCactus','Tbir
 // Maps alternate Excel tab names → SS store keys (when Angie renames a tab in the workbook)
 const SHEET_ALIAS={'Rural':'Ray','Power':'PowerRay'};
 // Bump this whenever parseWB changes structure so old caches are automatically re-parsed
-const PARSE_VER=6;
+const PARSE_VER=7;
 const TBL_DATA={};
 const EXPORT_METRICS=[
   // Sales
@@ -1306,15 +1306,24 @@ function parseSOS_Tab(wb, sheetName, resAll, yr){
   // ── Auto-detect layout: "new" layout has "Time" in col D (index 3); classic has it in col B (index 1) ──
   // New layout (Period 4+): colA=empty, colB=storeNum+Name, colC=shortName|empty, colD=mealLabel/header, colE+=dates
   // Classic layout:         colA=storeName,                                         colB=mealLabel/header, colC+=dates
-  let _layout='classic'; // 'classic' or 'new'
+  // ── Auto-detect layout by locating the "Time" header cell ──
+  // Window P4+: colB=storeNum+Name(repeats), colC=shortName(first row), colD="Time"/label, colE+=dates
+  // Kiosk/orig: colB=storeName(repeats),     colC=shortName(first row), colD="Time"/label, colE+=dates
+  // Classic:    colA=storeName(one row),                                 colB="Time"/label, colC+=dates
+  let _layout='classic';
+  let _cStore=0,_cLabel=1,_cDatesStart=2; // classic defaults
   for(let r=0;r<=Math.min(10,maxR);r++){
-    const d=ws[XLSX.utils.encode_cell({r,c:3})];
-    if(d&&String(d.v||'').trim().toLowerCase()==='time'){_layout='new';break;}
+    // Check col D (index 3) — Kiosk / new layout
+    const c3=ws[XLSX.utils.encode_cell({r,c:3})];
+    if(c3&&String(c3.v||'').trim().toLowerCase()==='time'){
+      _layout='new';_cStore=1;_cLabel=3;_cDatesStart=4;break;
+    }
+    // Check col C (index 2) — Window P4+ layout (store in col B, label in col C when no shortname col)
+    const c2=ws[XLSX.utils.encode_cell({r,c:2})];
+    if(c2&&String(c2.v||'').trim().toLowerCase()==='time'){
+      _layout='new';_cStore=0;_cLabel=2;_cDatesStart=3;break;
+    }
   }
-  // Column indices that depend on layout
-  const _cStore =_layout==='new'?1:0; // col with store name
-  const _cLabel =_layout==='new'?3:1; // col with meal label ("Lunch Peak" / "Dinner Peak")
-  const _cDatesStart=_layout==='new'?4:2; // first date column
 
   // ── Locate header row ──
   let headerRow=-1;
@@ -1421,6 +1430,9 @@ function parseSOS_Tab(wb, sheetName, resAll, yr){
     const lc=ws[XLSX.utils.encode_cell({r,c:_cLabel})];
     if(!lc||lc.v==null)continue;
     const lbl=String(lc.v).trim();
+    // Skip combined "Total-Lunch/dinner" rows — they match both lunch and dinner regex
+    // but are a blended average, not a peak measurement; including them corrupts both metrics
+    if(/total[-\s/]*(lunch|dinner)/i.test(lbl))continue;
     const isL=/\blunch\b/i.test(lbl);
     const isD=/\bdinner\b/i.test(lbl);
     if(!isL&&!isD)continue;
