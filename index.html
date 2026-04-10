@@ -406,7 +406,7 @@ input[type=file]{display:none}
   <div class="hdr-acts">
     <span class="last-upd hid" id="lastUpd"></span>
     <span class="db-badge hid" id="dbBadge" title="Data auto-saved in your browser — no re-upload needed">💾 Auto-saved</span>
-    <button class="btn-ghost hid" id="btnSaveAll" onclick="saveAll()" title="Save districts, labels &amp; settings to your browser">💾 Save</button>
+    <button class="btn-ghost hid" id="btnSyncAll" onclick="syncAll()" title="Sync districts, labels &amp; settings across all users">☁ Sync</button>
     <button class="btn-ghost hid" id="btnExport" onclick="openExportModal()" title="Export selected weeks as PDF or Excel">📤 Export</button>
     <button class="btn-ghost hid" id="btnAddMonth" onclick="document.getElementById('addMoModal').classList.add('on')">＋ Load Month</button>
     <button class="btn-gold" id="mainUB" onclick="document.getElementById('mainFI').click()">
@@ -746,7 +746,7 @@ function doSignIn(){
   document.getElementById('hdrUser').textContent='👤 '+email;
   document.getElementById('btnSignOut').style.display='inline-block';
   // Now that auth is confirmed, kick off data restore then load shared reports
-  initDB().then(()=>{ loadSharedReports(); }).catch(err=>{console.warn('initDB failed:',err); loadSharedReports();});
+  initDB().then(()=>{ _pullConfigFromServer().then(ch=>{if(ch){renderDL();buildLocSel();}}).catch(()=>{}); loadSharedReports(); }).catch(err=>{console.warn('initDB failed:',err); loadSharedReports();});
 }
 function doSignOut(){
   if(!confirm('Sign out? You will need to re-enter your @angies.com email to access the dashboard.'))return;
@@ -837,7 +837,7 @@ function removePeriod(key){
     document.getElementById('perTabs').innerHTML='';
     document.getElementById('wkPills').innerHTML='';
     document.getElementById('kpiRow').innerHTML='';
-    ['btnAddMonth','btnSaveAll','btnExport'].forEach(id=>document.getElementById(id).classList.add('hid'));
+    ['btnAddMonth','btnSyncAll','btnExport'].forEach(id=>document.getElementById(id).classList.add('hid'));
     return;
   }
   buildPerTabs();buildWkPills();update();
@@ -875,22 +875,98 @@ function autoSaveConfig(){
       el.textContent='💾 Saved '+new Date().toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});
       el.classList.remove('hid');
     }
+    // Also push to backend silently (non-blocking)
+    _pushConfigToServer().catch(()=>{});
   }).catch(err=>console.warn('Config save failed',err));
 }
-function saveAll(){
-  const el=document.getElementById('dbBadge');
-  dbSaveConfig().then(()=>{
-    if(el){
-      el.textContent='✅ All saved!';
-      el.classList.remove('hid');
-      setTimeout(()=>{
-        el.textContent='💾 Saved '+new Date().toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});
-      },2000);
+
+// ── Sync: push config to Manus backend so all users share districts/labels/goals ──
+async function _pushConfigToServer(){
+  try{
+    const email=localStorage.getItem('angies_auth_email')||'unknown@angies.com';
+    const payload={districts:APP.districts,labels:APP.labels,goals:APP.goals,_cfgVer:2,updatedBy:email,updatedAt:new Date().toISOString()};
+    const res=await fetch('/api/sync-config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    if(!res.ok)throw new Error('HTTP '+res.status);
+    const json=await res.json();
+    if(json.ok)console.log('[Manus] Config synced to server');
+    else console.warn('[Manus] Config sync unexpected response:',json);
+    return true;
+  }catch(err){console.warn('[Manus] Config sync failed (local-only):',err);return false;}
+}
+
+// ── Pull shared config from Manus backend and merge ──
+async function _pullConfigFromServer(){
+  try{
+    const res=await fetch('/api/sync-config');
+    if(!res.ok)throw new Error('HTTP '+res.status);
+    const ct=res.headers.get('content-type')||'';
+    if(!ct.includes('application/json'))return false; // no backend
+    const json=await res.json();
+    if(!json||!json.ok)return false;
+    const cfg=json.config;
+    if(!cfg)return false;
+    let changed=false;
+    // Merge districts — add any from server that don't exist locally (by id)
+    if(cfg.districts&&Array.isArray(cfg.districts)){
+      const localIds=new Set(APP.districts.map(d=>d.id));
+      cfg.districts.forEach(d=>{if(!localIds.has(d.id)){APP.districts.push(d);changed=true;}});
+      // Also update existing districts if server version is newer
+      cfg.districts.forEach(sd=>{
+        const ld=APP.districts.find(d=>d.id===sd.id);
+        if(ld&&JSON.stringify(ld)!==JSON.stringify(sd)){Object.assign(ld,sd);changed=true;}
+      });
+      // Remove local districts not on server (server is source of truth)
+      const serverIds=new Set(cfg.districts.map(d=>d.id));
+      const before=APP.districts.length;
+      APP.districts=APP.districts.filter(d=>serverIds.has(d.id));
+      if(APP.districts.length!==before)changed=true;
     }
-  }).catch(err=>{
-    console.warn('Save all failed',err);
-    if(el){el.textContent='⚠ Save failed';el.classList.remove('hid');}
-  });
+    // Merge goals — server wins
+    if(cfg.goals&&Object.keys(cfg.goals).length){APP.goals=Object.assign({},APP.goals,cfg.goals);changed=true;}
+    // Merge labels — server wins
+    if(cfg.labels&&Object.keys(cfg.labels).length){APP.labels=Object.assign({},APP.labels,cfg.labels);changed=true;}
+    if(changed){
+      dbSaveConfig().catch(()=>{});
+      console.log('[Manus] Config pulled from server — districts/goals/labels updated');
+    }
+    return changed;
+  }catch(err){console.warn('[Manus] Config pull failed:',err);return false;}
+}
+
+// ── Sync button handler: push local config, pull server config, refresh UI ──
+async function syncAll(){
+  const btn=document.getElementById('btnSyncAll');
+  const el=document.getElementById('dbBadge');
+  if(btn)btn.disabled=true;
+  if(btn)btn.textContent='☁ Syncing…';
+  try{
+    // 1. Save locally first
+    await dbSaveConfig();
+    // 2. Push to server
+    const pushed=await _pushConfigToServer();
+    // 3. Pull from server (picks up other users' changes)
+    const pulled=await _pullConfigFromServer();
+    if(pulled){
+      // Refresh UI with merged data
+      renderDL();buildLocSel();
+      if(typeof updDist==='function')updDist(APP.week);
+      if(typeof renderCfgSettings==='function'){
+        const cfgPanel=document.getElementById('cfg-settings');
+        if(cfgPanel&&cfgPanel.classList.contains('on'))renderCfgSettings();
+      }
+    }
+    if(el){
+      el.textContent=pushed?'☁ Synced!':'💾 Saved locally';
+      el.classList.remove('hid');
+      setTimeout(()=>{el.textContent='☁ Synced '+new Date().toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});},2000);
+    }
+    showToast(pushed?'☁ Settings synced — all users will see your changes.':'💾 Settings saved locally (server unavailable).',4000);
+  }catch(err){
+    console.warn('Sync failed',err);
+    if(el){el.textContent='⚠ Sync failed';el.classList.remove('hid');}
+    showToast('⚠ Sync failed — settings saved locally only.',4000);
+  }
+  if(btn){btn.disabled=false;btn.textContent='☁ Sync';}
 }
 async function clearSavedData(){
   if(!confirm('Clear ALL saved data from your browser?\n\nThis removes all months, districts, and settings. You will need to re-upload your Excel files.'))return;
@@ -901,7 +977,7 @@ async function clearSavedData(){
     document.getElementById('perTabs').innerHTML='';
     document.getElementById('wkPills').innerHTML='';
     document.getElementById('kpiRow').innerHTML='';
-    ['btnAddMonth','btnSaveAll','btnExport'].forEach(id=>document.getElementById(id).classList.add('hid'));
+    ['btnAddMonth','btnSyncAll','btnExport'].forEach(id=>document.getElementById(id).classList.add('hid'));
   }catch(e){console.warn('Clear failed',e);}
 }
 async function initDB(){
@@ -1528,7 +1604,7 @@ function fmtEDate(s){const d=excelDtToJS(s);return String(d.getUTCMonth()+1).pad
 // DASHBOARD
 function showDash(){
   document.getElementById('btnAddMonth').classList.remove('hid');
-  document.getElementById('btnSaveAll').classList.remove('hid');
+  document.getElementById('btnSyncAll').classList.remove('hid');
   document.getElementById('btnExport').classList.remove('hid');
 
   document.getElementById('mainUB').innerHTML='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Upload Report';
