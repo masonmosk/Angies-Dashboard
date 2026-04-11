@@ -3720,24 +3720,25 @@ async function loadSharedReports(){
           console.log('[Manus] Loaded from server JSON:',d.key);
           continue;
         }
-        // ── Fallback: download Excel and parse client-side ──
-        // Skip heavy download+parse on mobile to prevent OOM crashes
-        const _isMobile=/Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
-        if(_isMobile){console.warn('[Manus] Skipping Excel download on mobile for',row.fileKey,'— server should provide parsedData');continue;}
+        // ── Fallback: download Excel and parse client-side (all devices) ──
         const fileRes=await fetch(row.fileUrl);
         if(!fileRes.ok){console.warn('[Manus] Could not fetch file:',row.fileUrl,fileRes.status);continue;}
         let buf=await fileRes.arrayBuffer();
-        const wb=XLSX.read(new Uint8Array(buf),{type:'array',cellDates:false,cellNF:true,cellStyles:false});
+        // Yield before heavy parse so browser stays responsive
+        await new Promise(r=>setTimeout(r,0));
+        const bytes=new Uint8Array(buf);
+        const wb=XLSX.read(bytes,{type:'array',cellDates:false,cellNF:true,cellStyles:false});
         const fname=(row.fileKey||'').split('/').pop()||row.fileKey;
         const d=parseWB(wb,fname);
         d._v=PARSE_VER;
         APP.monthly[d.key]=d;
         _mergeStoreNums(d);
         if(!APP.period)APP.period=d.key;
+        // Cache to IndexedDB so this file doesn't need re-downloading
         dbSave(d.key,buf,fname,d).catch(()=>{});
         buf=null; // free buffer memory
         loaded++;
-        // Yield between files to prevent freeze
+        // Yield after parse to let browser GC before next file
         await new Promise(r=>setTimeout(r,0));
       }catch(err){console.warn('[Manus] Failed to load report',row.fileKey,err);}
     }
