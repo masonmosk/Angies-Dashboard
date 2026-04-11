@@ -3690,6 +3690,18 @@ async function loadSharedReports(){
     for(const row of rows){
       if(row.periodKey&&APP.monthly[row.periodKey]){continue;}
       try{
+        // ── Fast path: use server-parsed JSON (no Excel download, safe for mobile) ──
+        if(row.parsedData){
+          const d=JSON.parse(row.parsedData);
+          d._v=PARSE_VER;
+          APP.monthly[d.key]=d;
+          if(d.storeNums)_mergeStoreNums(d);
+          if(!APP.period)APP.period=d.key;
+          loaded++;
+          console.log('[Manus] Loaded from server JSON:',d.key);
+          continue;
+        }
+        // ── Fallback: download Excel and parse client-side (desktop only) ──
         const fileRes=await fetch(row.fileUrl);
         if(!fileRes.ok){console.warn('[Manus] Could not fetch file:',row.fileUrl,fileRes.status);continue;}
         const buf=await fileRes.arrayBuffer();
