@@ -940,8 +940,8 @@ async function syncAll(){
   if(btn)btn.disabled=true;
   if(btn)btn.textContent='☁ Syncing…';
   try{
-    // 1. Save locally first
-    await dbSaveConfig();
+    // 1. Save locally first (non-fatal — don't let IndexedDB errors kill server sync)
+    try{await dbSaveConfig();}catch(e){console.warn('[Manus] Local save failed (non-fatal):',e);}
     // 2. Push to server
     const pushed=await _pushConfigToServer();
     // 3. Pull from server (picks up other users' changes)
