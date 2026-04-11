@@ -792,7 +792,8 @@ function dbSave(key,buffer,name,parsed){
   if(!_db)return Promise.resolve();
   return new Promise((res,rej)=>{
     const tx=_db.transaction(DB_STORE,'readwrite');
-    const rec={key,buffer,name,savedAt:new Date().toISOString()};
+    const rec={key,name,savedAt:new Date().toISOString()};
+    if(buffer)rec.buffer=buffer; // only store buffer when provided (saves mobile memory)
     if(parsed)rec.parsed=parsed;
     tx.objectStore(DB_STORE).put(rec);
     tx.oncomplete=res;tx.onerror=rej;
@@ -1015,39 +1016,49 @@ async function initDB(){
         if(!cfg._cfgVer||cfg._cfgVer<2){APP.goals.acc=1.0;APP.goals.labor=24;}
       }
     }
-    // Collect file metadata via cursor (one record at a time to limit memory)
-    const pending=[];
+    // Pass 1: cursor scan — handle cached records immediately (no buffer kept),
+    // collect keys of stale records that need re-parsing (buffer NOT held in memory)
+    const staleKeys=[];
+    let lastSaved='',fileCount=0;
     await dbLoadEach(f=>{
       if(!f.buffer)return; // skip config entries
-      pending.push(f);
-    });
-    if(!pending.length)return;
-    setLD(1,'Restoring saved data…');
-    pending.sort((a,b)=>new Date(a.savedAt)-new Date(b.savedAt));
-    let lastSaved='';
-    for(let fi=0;fi<pending.length;fi++){
-      const f=pending[fi];
-      try{
-        let d;
-        if(f.parsed&&f.parsed.key&&f.parsed._v===PARSE_VER){
-          // Fast path: use cached parsed JSON — no Excel re-parse needed
-          d=f.parsed;
-          // Free the raw buffer immediately — not needed when cache is valid
-          f.buffer=null;
-        } else {
-          // Slow fallback: re-parse from raw buffer
-          const wb=XLSX.read(new Uint8Array(f.buffer),{type:'array',cellDates:false,cellNF:true,cellStyles:false});
-          d=parseWB(wb,f.name||'');
-          d._v=PARSE_VER;
-          dbSave(f.key,f.buffer,f.name,d).catch(()=>{});
-          f.buffer=null; // free buffer after parsing
-        }
-        APP.monthly[d.key]=d;
-        _mergeStoreNums(d);
+      fileCount++;
+      if(f.parsed&&f.parsed.key&&f.parsed._v===PARSE_VER){
+        // Fast path: use cached JSON — buffer is never retained
+        APP.monthly[f.parsed.key]=f.parsed;
+        _mergeStoreNums(f.parsed);
         if(f.savedAt>lastSaved)lastSaved=f.savedAt;
-      }catch(err){console.warn('Failed to restore',f.key,err);}
-      // Yield to browser between files — prevents mobile from freezing/crashing
-      if(fi<pending.length-1)await new Promise(r=>setTimeout(r,0));
+      } else {
+        // Stale cache — only store the key, NOT the buffer
+        staleKeys.push({key:f.key,name:f.name,savedAt:f.savedAt});
+      }
+    });
+    if(!fileCount&&!staleKeys.length)return;
+    // Pass 2: re-parse stale records one at a time (max 1 buffer in memory)
+    if(staleKeys.length){
+      setLD(1,'Restoring saved data…');
+      for(let si=0;si<staleKeys.length;si++){
+        const sk=staleKeys[si];
+        try{
+          // Load this single record from IndexedDB
+          const f=await new Promise((res,rej)=>{
+            const tx=_db.transaction(DB_STORE,'readonly');
+            const req=tx.objectStore(DB_STORE).get(sk.key);
+            req.onsuccess=e=>res(e.target.result);req.onerror=rej;
+          });
+          if(!f||!f.buffer)continue;
+          await new Promise(r=>setTimeout(r,0)); // yield before heavy parse
+          const wb=XLSX.read(new Uint8Array(f.buffer),{type:'array',cellDates:false,cellNF:true,cellStyles:false});
+          const d=parseWB(wb,f.name||'');
+          d._v=PARSE_VER;
+          APP.monthly[d.key]=d;
+          _mergeStoreNums(d);
+          if(sk.savedAt>lastSaved)lastSaved=sk.savedAt;
+          // Save parsed cache so next load hits fast path (no re-parse)
+          dbSave(f.key,f.buffer,f.name,d).catch(()=>{});
+          await new Promise(r=>setTimeout(r,0)); // yield after parse for GC
+        }catch(err){console.warn('Failed to restore',sk.key,err);}
+      }
     }
     // Pick the period with the highest fiscal period number
     const pks=Object.keys(APP.monthly);
@@ -3734,8 +3745,9 @@ async function loadSharedReports(){
         APP.monthly[d.key]=d;
         _mergeStoreNums(d);
         if(!APP.period)APP.period=d.key;
-        // Cache to IndexedDB so this file doesn't need re-downloading
-        dbSave(d.key,buf,fname,d).catch(()=>{});
+        // Cache parsed JSON to IndexedDB (skip raw buffer — can re-download from server)
+        // Storing only parsed data keeps IndexedDB small enough for mobile
+        dbSave(d.key,null,fname,d).catch(()=>{});
         buf=null; // free buffer memory
         loaded++;
         // Yield after parse to let browser GC before next file
