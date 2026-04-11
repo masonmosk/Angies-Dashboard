@@ -807,6 +807,21 @@ function dbLoadAll(){
     req.onerror=rej;
   });
 }
+// Load records one at a time via cursor — avoids loading all buffers into memory at once
+function dbLoadEach(cb){
+  if(!_db)return Promise.resolve();
+  return new Promise((res,rej)=>{
+    const tx=_db.transaction(DB_STORE,'readonly');
+    const req=tx.objectStore(DB_STORE).openCursor();
+    req.onsuccess=e=>{
+      const cursor=e.target.result;
+      if(!cursor){res();return;}
+      cb(cursor.value);
+      cursor.continue();
+    };
+    req.onerror=rej;
+  });
+}
 function dbDeleteAll(){
   if(!_db)return Promise.resolve();
   return new Promise((res,rej)=>{
@@ -997,40 +1012,44 @@ async function initDB(){
       if(cfg.labels&&Object.keys(cfg.labels).length)APP.labels=cfg.labels;
       if(cfg.goals&&Object.keys(cfg.goals).length){
         APP.goals=Object.assign({},APP.goals,cfg.goals);
-        // Migrate: if saved config pre-dates v2, reset goals to new defaults (acc:1.0, labor:24)
         if(!cfg._cfgVer||cfg._cfgVer<2){APP.goals.acc=1.0;APP.goals.labor=24;}
       }
     }
-    // Restore uploaded report files (filter out config entry)
-    const files=(await dbLoadAll()).filter(f=>f.buffer);
-    if(!files.length){
-      // Even if no files, still show dash if districts were restored (nothing to show yet)
-      return;
-    }
+    // Collect file metadata via cursor (one record at a time to limit memory)
+    const pending=[];
+    await dbLoadEach(f=>{
+      if(!f.buffer)return; // skip config entries
+      pending.push(f);
+    });
+    if(!pending.length)return;
     setLD(1,'Restoring saved data…');
-    files.sort((a,b)=>new Date(a.savedAt)-new Date(b.savedAt));
-    let lastSaved='',mostRecentKey='';
-    for(const f of files){
+    pending.sort((a,b)=>new Date(a.savedAt)-new Date(b.savedAt));
+    let lastSaved='';
+    for(let fi=0;fi<pending.length;fi++){
+      const f=pending[fi];
       try{
         let d;
         if(f.parsed&&f.parsed.key&&f.parsed._v===PARSE_VER){
           // Fast path: use cached parsed JSON — no Excel re-parse needed
           d=f.parsed;
+          // Free the raw buffer immediately — not needed when cache is valid
+          f.buffer=null;
         } else {
-          // Slow fallback: re-parse from raw buffer (cache missing, stale, or version bumped)
+          // Slow fallback: re-parse from raw buffer
           const wb=XLSX.read(new Uint8Array(f.buffer),{type:'array',cellDates:false,cellNF:true,cellStyles:false});
           d=parseWB(wb,f.name||'');
-          d._v=PARSE_VER; // stamp version so next load hits fast path
-          // Upgrade the record to include parsed cache for next load
+          d._v=PARSE_VER;
           dbSave(f.key,f.buffer,f.name,d).catch(()=>{});
+          f.buffer=null; // free buffer after parsing
         }
         APP.monthly[d.key]=d;
-        _mergeStoreNums(d); // update STNUM with any new store numbers from Store List sheet
-        // Track most recently saved month — that becomes active on reload
-        if(f.savedAt>lastSaved){lastSaved=f.savedAt;mostRecentKey=d.key;}
+        _mergeStoreNums(d);
+        if(f.savedAt>lastSaved)lastSaved=f.savedAt;
       }catch(err){console.warn('Failed to restore',f.key,err);}
+      // Yield to browser between files — prevents mobile from freezing/crashing
+      if(fi<pending.length-1)await new Promise(r=>setTimeout(r,0));
     }
-    // Pick the period with the highest fiscal period number, not the most recently uploaded
+    // Pick the period with the highest fiscal period number
     const pks=Object.keys(APP.monthly);
     if(pks.length){
       pks.sort((a,b)=>{
@@ -3701,10 +3720,13 @@ async function loadSharedReports(){
           console.log('[Manus] Loaded from server JSON:',d.key);
           continue;
         }
-        // ── Fallback: download Excel and parse client-side (desktop only) ──
+        // ── Fallback: download Excel and parse client-side ──
+        // Skip heavy download+parse on mobile to prevent OOM crashes
+        const _isMobile=/Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+        if(_isMobile){console.warn('[Manus] Skipping Excel download on mobile for',row.fileKey,'— server should provide parsedData');continue;}
         const fileRes=await fetch(row.fileUrl);
         if(!fileRes.ok){console.warn('[Manus] Could not fetch file:',row.fileUrl,fileRes.status);continue;}
-        const buf=await fileRes.arrayBuffer();
+        let buf=await fileRes.arrayBuffer();
         const wb=XLSX.read(new Uint8Array(buf),{type:'array',cellDates:false,cellNF:true,cellStyles:false});
         const fname=(row.fileKey||'').split('/').pop()||row.fileKey;
         const d=parseWB(wb,fname);
@@ -3713,7 +3735,10 @@ async function loadSharedReports(){
         _mergeStoreNums(d);
         if(!APP.period)APP.period=d.key;
         dbSave(d.key,buf,fname,d).catch(()=>{});
+        buf=null; // free buffer memory
         loaded++;
+        // Yield between files to prevent freeze
+        await new Promise(r=>setTimeout(r,0));
       }catch(err){console.warn('[Manus] Failed to load report',row.fileKey,err);}
     }
     if(loaded>0&&Object.keys(APP.monthly).length){showDash();}
