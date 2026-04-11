@@ -3711,6 +3711,30 @@ async function loadSharedReports(){
   _sharedLoading=false;
 }
 // On sign-in and on page load (if already signed in), load shared reports after local DB restore
+// ── Page startup: restore session for returning users ────────────────────────
+document.addEventListener('DOMContentLoaded', function() {
+  const stored = localStorage.getItem(SIGNIN_KEY);
+  if (stored && stored.toLowerCase().endsWith('@angies.com')) {
+    // Valid session — hide login overlay and restore dashboard
+    document.getElementById('signinOv').style.display = 'none';
+    document.getElementById('hdrUser').textContent = '👤 ' + stored;
+    document.getElementById('btnSignOut').style.display = 'inline-block';
+    // Restore local data then load shared reports from server
+    initDB()
+      .then(() => {
+        _pullConfigFromServer()
+          .then(ch => { if (ch) { renderDL(); buildLocSel(); } })
+          .catch(() => {});
+        loadSharedReports();
+      })
+      .catch(err => {
+        console.warn('[Startup] initDB failed:', err);
+        loadSharedReports();
+      });
+  }
+  // If no valid session, the login overlay stays visible (default state)
+});
+// ─────────────────────────────────────────────────────────────────────────────
 </script>
 </body>
 </html>
