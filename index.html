@@ -426,6 +426,8 @@ input[type=file]{display:none}
     <div class="signin-tagline">Operations Dashboard · Internal Use Only</div>
     <label class="signin-lbl" for="signinEmail">Email Address</label>
     <input class="signin-input" type="email" id="signinEmail" placeholder="you@angies.com" autocomplete="email">
+    <label class="signin-lbl" for="signinPin" style="margin-top:10px">PIN</label>
+    <input class="signin-input" type="password" id="signinPin" placeholder="Enter 4-digit PIN" maxlength="4" inputmode="numeric" autocomplete="off" style="letter-spacing:8px;text-align:center;font-size:18px">
     <div class="signin-err" id="signinErr"></div>
     <button class="signin-btn" onclick="doSignIn()">Access Dashboard</button>
     <div class="signin-note">🔒 Access is restricted to @angies.com accounts.<br>All data is processed locally — nothing leaves your device.</div>
@@ -736,10 +738,14 @@ function checkAuth(){
 }
 function doSignIn(){
   const el=document.getElementById('signinEmail');
+  const pinEl=document.getElementById('signinPin');
   const errEl=document.getElementById('signinErr');
   const email=(el.value||'').trim().toLowerCase();
-  if(!email){errEl.textContent='Please enter your email address.';return;}
+  const pin=(pinEl.value||'').trim();
+  if(!email){errEl.textContent='Please enter your email address.';el.focus();return;}
   if(!email.endsWith('@angies.com')){errEl.textContent='Access is restricted to @angies.com email addresses.';el.focus();return;}
+  if(!pin){errEl.textContent='Please enter the 4-digit PIN.';pinEl.focus();return;}
+  if(pin!=='1122'){errEl.textContent='Incorrect PIN. Please try again.';pinEl.value='';pinEl.focus();return;}
   localStorage.setItem(SIGNIN_KEY,email);
   errEl.textContent='';
   document.getElementById('signinOv').style.display='none';
@@ -754,7 +760,8 @@ function doSignOut(){
   location.reload();
 }
 // Allow pressing Enter in email field
-document.getElementById('signinEmail').addEventListener('keydown',e=>{if(e.key==='Enter')doSignIn();});
+document.getElementById('signinEmail').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();document.getElementById('signinPin').focus();}});
+document.getElementById('signinPin').addEventListener('keydown',e=>{if(e.key==='Enter')doSignIn();});
 // ──────────────────────────────────────────────────────────────────────────────
 
 // FILE HANDLING (drag/drop on whole page body when no data yet)
