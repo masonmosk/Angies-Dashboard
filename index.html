@@ -563,6 +563,9 @@ input[type=file]{display:none}
         <div class="cg2">
           <div class="cc"><div class="ct">All-In Labor % — Actual vs Projected</div><div class="cw"><canvas id="cALP"></canvas></div></div>
           <div class="cc"><div class="ct">All-In vs Excl. Training Comparison</div><div class="cw"><canvas id="cALC"></canvas></div></div>
+          <div class="cc"><div class="ct">SPLH — Actual vs Projected</div><div class="cw"><canvas id="cAISP"></canvas></div></div>
+          <div class="cc"><div class="ct">Scheduled vs Actual Hours</div><div class="cw"><canvas id="cAIHR"></canvas></div></div>
+          <div class="cc sp2"><div class="ct">Weekly All-In Labor % Trend</div><div class="cw"><canvas id="cAILT"></canvas></div></div>
         </div>
       </div>
       <!-- Training Breakdown -->
@@ -570,7 +573,9 @@ input[type=file]{display:none}
         <div class="cg2">
           <div class="cc"><div class="ct">NSO Training Hours (Daily)</div><div class="cw"><canvas id="cNSO"></canvas></div></div>
           <div class="cc"><div class="ct">Regular Training Hours (Daily)</div><div class="cw"><canvas id="cRTR"></canvas></div></div>
-          <div class="cc sp2"><div class="ct">Training Hours Comparison (NSO vs Regular)</div><div class="cw"><canvas id="cTRC"></canvas></div></div>
+          <div class="cc"><div class="ct">Training Hours Comparison (NSO vs Regular)</div><div class="cw"><canvas id="cTRC"></canvas></div></div>
+          <div class="cc"><div class="ct">Training Wages — NSO vs Regular ($)</div><div class="cw"><canvas id="cTRW"></canvas></div></div>
+          <div class="cc sp2"><div class="ct">Weekly Training % Impact Trend</div><div class="cw"><canvas id="cTRT"></canvas></div></div>
         </div>
       </div>
       <div class="tc"><div class="ct" id="lborTblTitle">Labor by Store</div><table class="dt" id="tL"></table></div>
@@ -626,6 +631,7 @@ input[type=file]{display:none}
       <div class="cg2">
         <div class="cc sp2"><div class="ct">COGS Variance by Category ($)</div><div class="cw"><canvas id="cCG"></canvas></div></div>
       </div>
+      <div class="tc"><div class="ct">COGS Variance — Daily Breakdown ($)</div><table class="dt" id="tCogsDays"></table></div>
     </div>
 
     <div class="pan" id="pan-acc">
@@ -669,7 +675,7 @@ const SS=['Baseline','Signal','QC','Ray','Pinnacle','Central','LoneCactus','Tbir
 // Maps alternate Excel tab names → SS store keys (when Angie renames a tab in the workbook)
 const SHEET_ALIAS={'Rural':'Ray','Power':'PowerRay'};
 // Bump this whenever parseWB changes structure so old caches are automatically re-parsed
-const PARSE_VER=7;
+const PARSE_VER=9;
 const TBL_DATA={};
 const EXPORT_METRICS=[
   // Sales
@@ -1307,7 +1313,7 @@ function parseSheet(wb,name){
   const rng=XLSX.utils.decode_range(ws['!ref']);
   const maxR=Math.min(rng.e.r,499);
   const wks={};
-  let cWk=null,wNum=0,inCOGS=false;
+  let cWk=null,wNum=0,inCOGS=false,inTraining=false;
   const MM={'Projected Sales':'pjS','Actual Sales':'acS','Sales Variance':'svD',
     'Lobster Revenue':'lob','Prime Revenue':'pri','Burger Revenue':'bur','Chicken Revenue':'chk','Beverage + Discount Revenue':'bev',
     'Sales - Last Year':'sLY','Sales - This Year':'sTY',
@@ -1356,7 +1362,7 @@ function parseSheet(wb,name){
     if(/^Week\s+\d+$/i.test(lbl)){
       const dc=ws[XLSX.utils.encode_cell({r,c:3})];
       if(dc&&dc.v==='Monday'){
-        wNum++;cWk='Week '+wNum;inCOGS=false;
+        wNum++;cWk='Week '+wNum;inCOGS=false;inTraining=false;
         const dtc=ws[XLSX.utils.encode_cell({r:r+1,c:3})];
         let sd='';
         if(dtc&&typeof dtc.v==='number'&&dtc.v>40000)sd=fmtEDate(dtc.v);
@@ -1364,9 +1370,19 @@ function parseSheet(wb,name){
       }
     }
     if(!cWk)continue;
-    if(lbl.includes('COGS'))inCOGS=true;
-    if(lbl==='Other Metrics')inCOGS=false;
-    const mk=MM[lbl]||(MMN[_normLbl(lbl)]);
+    if(/^Training\s*\(Regular\s*&\s*NSO\)$/i.test(lbl)){inTraining=true;inCOGS=false;continue;}
+    if(lbl.includes('COGS')){inCOGS=true;inTraining=false;}
+    if(lbl==='Other Metrics'){inCOGS=false;inTraining=false;}
+    // Inside training section, remap generic labels to training-specific keys
+    let mk;
+    if(inTraining){
+      if(/^Scheduled\s+Hours?$/i.test(lbl)||/^Scheduled\s+Hrs?$/i.test(lbl))mk='scTrH';
+      else if(/^Actual\s+Hours?$/i.test(lbl)||/^Actual\s+Hrs?$/i.test(lbl))mk='acTrH';
+      else if(/^Variance$/i.test(lbl))mk='trHV';
+      else mk=MM[lbl]||(MMN[_normLbl(lbl)]);
+    } else {
+      mk=MM[lbl]||(MMN[_normLbl(lbl)]);
+    }
     if(!mk)continue;
     if(CM.has(mk)&&!inCOGS)continue;
     const daily=[];
@@ -1915,8 +1931,18 @@ function updKPI(d,wk,dy){
   const sp=gv(d,wk,'aSP',dy),spp=gv(d,wk,'pSP',dy);
   const {co,tx,acc}=getAccData(wk,dy);
   const dyLbl=wk==='_period'?'Period':Array.isArray(dy)?DAYS.filter((_,i)=>dy.includes(i)).join('+'):dy==='all'?'Week':'WTD';
+  // Transactions with WoW comparison
+  const txCur=tx;
+  let txPrev=0,hasPrevTx=false;
+  if(wk!=='_period'){
+    const wks=getPD().weeks||[];const wkIdx=wks.indexOf(wk);
+    if(wkIdx>0){const pwk=wks[wkIdx-1];const pAcc=getAccData(pwk,dy);txPrev=pAcc.tx;hasPrevTx=txPrev>0;}
+  }
+  const txDelta=hasPrevTx?txCur-txPrev:0;
+  const txPct=hasPrevTx&&txPrev>0?((txDelta/txPrev)*100):0;
   document.getElementById('kpiRow').innerHTML=`
     <div class="kc ${hasPj?(vD>=0?'pos':'neg'):''}"><div class="kl">Total Sales <small style="font-weight:400;text-transform:none">${dyLbl}</small></div><div class="kv">${$F(ac)}</div><div class="ks ${hasPj?(vD>=0?'pos':'neg'):''}">${hasPj?(vD>=0?'+':'')+$F(vD)+' vs proj':'<span style="color:var(--gtxt)">No projection data</span>'}</div></div>
+    <div class="kc ${hasPrevTx?(txDelta>=0?'pos':'neg'):''}"><div class="kl">Transactions <small style="font-weight:400;text-transform:none">${dyLbl}</small></div><div class="kv">${nF(txCur)}</div><div class="ks">${hasPrevTx?'Prev Wk: '+nF(txPrev)+' &nbsp;·&nbsp; <span style="font-weight:700">'+(txDelta>=0?'+':'')+nF(txDelta)+' ('+( txPct>=0?'+':'')+txPct.toFixed(1)+'%)</span>':'<span style="color:var(--gtxt)">No prev week data</span>'}</div></div>
     <div class="kc ${hasPj?(vD>=0?'pos':'neg'):''}"><div class="kl">Sales Variance %</div><div class="kv">${hasPj?(vP>=0?'+':'')+vP.toFixed(1)+'%':'—'}</div><div class="ks">Proj: ${hasPj?$F(pj):'—'}</div></div>
     <div class="kc ${haslP?(lA<=lP?'pos':'neg'):''}"><div class="kl">Actual Labor %</div><div class="kv">${lA.toFixed(2)}%</div><div class="ks">Proj: ${haslP?lP.toFixed(2)+'%':'—'}${haslP?' &nbsp;·&nbsp; Var: '+(lA-lP>=0?'+':'')+(lA-lP).toFixed(2)+'pp':''}</div></div>
     <div class="kc gld"><div class="kl">Actual SPLH</div><div class="kv">$${sp.toFixed(1)}</div><div class="ks">Proj: ${spp>0?'$'+spp.toFixed(1):'—'}</div></div>
@@ -1977,7 +2003,7 @@ function updLaborPlan(d,wk,dy){
     <div class="lp-card" style="border-top-color:var(--red)" title="Wage % Variance: difference between actual and projected wage spend as a % of sales. NSO = new store opening training. Reg = regular training hours."><div class="lp-label">Wage % Var</div><div class="lp-val" ${varCls(wgV)}>${wgV.toFixed(1)}%</div><div class="lp-sub">NSO ${nsoLP.toFixed(1)}% · Reg ${regLP.toFixed(1)}%</div></div>`;
   // planning table per store
   bldTbl('tLaborPlan',wk,dy,[
-    {l:'Store',k:'name'},{l:'Model Hrs',k:'lmH',f:'dec'},{l:'Sched Hrs',k:'scH',f:'dec'},{l:'Actual Hrs',k:'acH',f:'dec'},{l:'Hrs Var',k:'_hV',f:'dec±'},{l:'Ideal Hrs',k:'idH',f:'dec'},{l:'Cut/Add',k:'needH',f:'dec±'},{l:'NSO Tr%',k:'nsoLP',f:'%'},{l:'Reg Tr%',k:'regLP',f:'%'}
+    {l:'Store',k:'name'},{l:'Model Hrs',k:'lmH',f:'dec'},{l:'Sched Hrs',k:'scH',f:'dec'},{l:'Actual Hrs',k:'acH',f:'dec'},{l:'Hrs Var',k:'_hV',f:'dec±'},{l:'Ideal Hrs',k:'idH',f:'dec'},{l:'Cut/Add',k:'needH',f:'dec±'},{l:'Tr Sched',k:'scTrH',f:'dec'},{l:'Tr Actual',k:'_acTrH',f:'dec'},{l:'Tr Var',k:'_trHV',f:'dec±'},{l:'NSO Tr%',k:'nsoLP',f:'%'},{l:'Reg Tr%',k:'regLP',f:'%'}
   ]);
   bldTblFilter('tLaborPlan');
 }
@@ -1992,11 +2018,12 @@ function renderLaborTab(d,wk,dy){
     document.getElementById('lborTblTitle').textContent='Labor by Store — Excl. Training';
     const laborCols0=[{l:'Store',k:'name'},{l:'Labor % (Excl Tr)',k:'aLP',f:'%'},{l:'Proj %',k:'pLP',f:'%'}];
     if(APP.week!=='_period'&&getPD().weeks&&getPD().weeks.indexOf(wk)>0)laborCols0.push({l:'WoW Δ',k:'_wowL',f:'%wow'});
-    laborCols0.push({l:'SPLH',k:'aSP',f:'$1'},{l:'Sched Hrs',k:'scH',f:'dec'},{l:'Act Hrs',k:'acH',f:'dec'},{l:'Hrs Var',k:'_hV',f:'dec±'});
+    laborCols0.push({l:'SPLH',k:'aSP',f:'$1'},{l:'Sched Hrs',k:'scH',f:'dec'},{l:'Act Hrs',k:'acH',f:'dec'},{l:'Hrs Var',k:'_hV',f:'dec±'},{l:'Tr Sched',k:'scTrH',f:'dec'},{l:'Tr Actual',k:'_acTrH',f:'dec'},{l:'Tr Var',k:'_trHV',f:'dec±'});
     bldTbl('tL',wk,dy,laborCols0);
     bldTblFilter('tL');
   } else if(t===1){
     const hasAlLP=gda(d,wk,'alLP').some(v=>v>0);
+    const ld=getLaborPlanData();
     drw('cALP','line',cLabels(wk),[
       {label:'All-In Proj',data:gda(d,wk,'plLP').map(v=>v*100),borderColor:'rgba(27,42,74,.5)',borderDash:[5,5],pointRadius:4,fill:false,tension:.3},
       {label:'All-In Actual',data:gda(d,wk,'alLP').map(v=>v*100),borderColor:'#E8432A',pointRadius:4,fill:false,tension:.3}
@@ -2005,13 +2032,27 @@ function renderLaborTab(d,wk,dy){
       {label:'All-In Labor %',data:gda(d,wk,'alLP').map(v=>v*100),borderColor:'#E8432A',pointRadius:4,fill:false,tension:.3},
       {label:'Excl. Training %',data:gda(d,wk,'aLP').map(v=>v*100),borderColor:'#1B2A4A',pointRadius:4,fill:false,tension:.3}
     ],'%');
+    drw('cAISP','bar',cLabels(wk),[
+      {label:'Projected SPLH',data:gda(d,wk,'pSP'),backgroundColor:'rgba(27,42,74,.15)',borderRadius:4},
+      {label:'Actual SPLH',data:gda(d,wk,'aSP'),backgroundColor:'rgba(212,168,67,.7)',borderRadius:4}
+    ],'$');
+    drw('cAIHR','bar',cLabels(wk),[
+      {label:'Scheduled',data:gda(ld,wk,'scH'),backgroundColor:'rgba(27,42,74,.15)',borderRadius:4},
+      {label:'Actual',data:gda(ld,wk,'acH'),backgroundColor:'rgba(39,174,96,.6)',borderRadius:4}
+    ],'');
+    // Weekly All-In trend across all weeks
+    drw('cAILT','line',wks,[
+      {label:'All-In %',data:wks.map(w=>gv(d,w,'alLP','all')*100),borderColor:'#E8432A',pointRadius:4,fill:false,tension:.3},
+      {label:'Excl. Training %',data:wks.map(w=>gv(d,w,'aLP','all')*100),borderColor:'#1B2A4A',pointRadius:4,fill:false,tension:.3},
+      {label:'All-In Proj %',data:wks.map(w=>gv(d,w,'plLP','all')*100),borderColor:'rgba(27,42,74,.5)',borderDash:[5,5],pointRadius:4,fill:false,tension:.3}
+    ],'%');
     if(!hasAlLP){
       const el=document.getElementById('lb-sec1');if(el){el.querySelectorAll('.ib').forEach(x=>x.remove());el.insertAdjacentHTML('afterbegin','<div class="ib" style="margin-bottom:14px"><span>ℹ️</span><span>All-In Labor % not found in this report — ensure your Excel includes "Actual Labor % (all in)" rows.</span></div>');}
     }
     document.getElementById('lborTblTitle').textContent='Labor by Store — All-In';
-    const laborCols1=[{l:'Store',k:'name'},{l:'All-In %',k:'alLP',f:'%'},{l:'Excl Tr %',k:'aLP',f:'%'}];
+    const laborCols1=[{l:'Store',k:'name'},{l:'All-In %',k:'alLP',f:'%'},{l:'Excl Tr %',k:'aLP',f:'%'},{l:'Training Δ',k:'_trDelta',f:'%'}];
     if(APP.week!=='_period'&&getPD().weeks&&getPD().weeks.indexOf(wk)>0)laborCols1.push({l:'WoW Δ',k:'_wowL',f:'%wow'});
-    laborCols1.push({l:'SPLH',k:'aSP',f:'$1'},{l:'Act Hrs',k:'acH',f:'dec'});
+    laborCols1.push({l:'Proj %',k:'plLP',f:'%'},{l:'SPLH',k:'aSP',f:'$1'},{l:'Sched Hrs',k:'scH',f:'dec'},{l:'Act Hrs',k:'acH',f:'dec'},{l:'Hrs Var',k:'_hV',f:'dec±'},{l:'Tr Sched',k:'scTrH',f:'dec'},{l:'Tr Actual',k:'_acTrH',f:'dec'},{l:'Tr Var',k:'_trHV',f:'dec±'},{l:'NSO Tr%',k:'nsoLP',f:'%'},{l:'Reg Tr%',k:'regLP',f:'%'});
     bldTbl('tL',wk,dy,laborCols1);
     bldTblFilter('tL');
   } else {
@@ -2019,11 +2060,21 @@ function renderLaborTab(d,wk,dy){
     drw('cNSO','bar',cLabels(wk),[{label:'NSO Training Hrs',data:gda(d,wk,'nsoH'),backgroundColor:'rgba(212,168,67,.7)',borderRadius:4}],'');
     drw('cRTR','bar',cLabels(wk),[{label:'Regular Training Hrs',data:gda(d,wk,'regH'),backgroundColor:'rgba(27,42,74,.65)',borderRadius:4}],'');
     drw('cTRC','bar',cLabels(wk),[{label:'NSO Training',data:gda(d,wk,'nsoH'),backgroundColor:'rgba(212,168,67,.7)',borderRadius:4},{label:'Regular Training',data:gda(d,wk,'regH'),backgroundColor:'rgba(27,42,74,.65)',borderRadius:4}],'');
+    // Training wages comparison (daily)
+    drw('cTRW','bar',cLabels(wk),[
+      {label:'NSO Wages $',data:gda(d,wk,'nsoW'),backgroundColor:'rgba(212,168,67,.7)',borderRadius:4},
+      {label:'Regular Wages $',data:gda(d,wk,'regW'),backgroundColor:'rgba(27,42,74,.65)',borderRadius:4}
+    ],'$');
+    // Weekly trend of training % impact
+    drw('cTRT','line',wks,[
+      {label:'NSO Training %',data:wks.map(w=>gv(d,w,'nsoLP','all')*100),borderColor:'#D4A843',pointRadius:4,fill:false,tension:.3},
+      {label:'Regular Training %',data:wks.map(w=>gv(d,w,'regLP','all')*100),borderColor:'#1B2A4A',pointRadius:4,fill:false,tension:.3}
+    ],'%');
     if(!hasNSO&&!hasREG){
       const el=document.getElementById('lb-sec2');if(el&&!el.querySelector('.ib'))el.insertAdjacentHTML('afterbegin','<div class="ib" style="margin-bottom:14px"><span>ℹ️</span><span>NSO/Regular training rows not found — ensure your Excel has "NSO Training Hours" and "Regular Training Hours" rows.</span></div>');
     }
     document.getElementById('lborTblTitle').textContent='Training by Store';
-    bldTbl('tL',wk,dy,[{l:'Store',k:'name'},{l:'NSO Hrs',k:'nsoH',f:'0'},{l:'Reg Hrs',k:'regH',f:'0'},{l:'NSO Wages',k:'nsoW',f:'$'},{l:'Reg Wages',k:'regW',f:'$'}]);
+    bldTbl('tL',wk,dy,[{l:'Store',k:'name'},{l:'Tr Sched',k:'scTrH',f:'dec'},{l:'Tr Actual',k:'_acTrH',f:'dec'},{l:'Tr Var',k:'_trHV',f:'dec±'},{l:'NSO Hrs',k:'nsoH',f:'0'},{l:'Reg Hrs',k:'regH',f:'0'},{l:'Total Tr Hrs',k:'_totTrH',f:'0'},{l:'NSO Wages',k:'nsoW',f:'$'},{l:'Reg Wages',k:'regW',f:'$'},{l:'Total Wages',k:'_totTrW',f:'$'},{l:'NSO Tr%',k:'nsoLP',f:'%'},{l:'Reg Tr%',k:'regLP',f:'%'}]);
     bldTblFilter('tL');
   }
 }
@@ -2248,11 +2299,43 @@ function updCOGS(d,wk,dy){
   // Positive = missing product (red/bad), Negative = excess/overage (amber/warning)
   const cgBg=v=>v>0?'rgba(232,67,42,.7)':'rgba(212,168,67,.7)';
   dstry('cCG');CH['cCG']=new Chart(document.getElementById('cCG'),{type:'bar',data:{labels:['Lobster','Chicken','Steak','Cheeses'],datasets:[{data:[L,C,S,Ch],backgroundColor:[cgBg(L),cgBg(C),cgBg(S),cgBg(Ch)],borderRadius:4}]},options:{...cOpts('$',true),plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>{const v=c.raw;return(v>0?'Missing Product: +':'Product Overage: ')+$F(v)}}}}}});
+  // COGS Daily Breakdown Table (Mon-Sun dollar variances per store)
+  bldCogsDaysTbl(wk);
   const wks=getPD().weeks||[];
   drw('cAC','line',wks,[{label:'Complaints/1K',data:wks.map(w=>{const{co:c,tx:t}=getAccData(w,'all');return t?c/t*1000:0}),borderColor:'#E8432A',backgroundColor:'rgba(232,67,42,.1)',fill:true,tension:.3,pointRadius:5}],'');
   bldTbl('tAC',wk,dy,[{l:'Store',k:'name'},{l:'Complaints',k:'comp',f:'0'},{l:'Transactions',k:'txns',f:'0'},{l:'Rate/1K',k:'_acc',f:'dec'}]);
   bldTblFilter('tAC');
   bldCogsAlerts(wk,dy);
+}
+function bldCogsDaysTbl(wk){
+  const el=document.getElementById('tCogsDays');if(!el)return;
+  const pd=getPD();
+  const prods=[{key:'cgL',label:'Lobster'},{key:'cgC',label:'Chicken'},{key:'cgS',label:'Steak'},{key:'cgCh',label:'Cheeses'}];
+  // Build rows: each store, each product, Mon-Fri daily values
+  const rows=[];
+  const stores=(APP.loc==='AllStores')?SS:
+    (APP.districts.find(di=>di.id===APP.loc)?APP.districts.find(di=>di.id===APP.loc).stores:[APP.loc]);
+  stores.forEach(s=>{
+    if(!pd.stores||!pd.stores[s])return;
+    const sd=pd.stores[s];
+    if(!sd[wk])return;
+    prods.forEach(p=>{
+      const m=sd[wk].m[p.key];
+      if(!m)return;
+      const daily=m.d||[0,0,0,0,0,0,0];
+      // Only include if at least one day has a non-zero value
+      if(!daily.some(v=>v!==0))return;
+      rows.push({store:stNm(s),product:p.label,mon:daily[0],tue:daily[1],wed:daily[2],thu:daily[3],fri:daily[4],sat:daily[5],sun:daily[6],weekly:m.w||daily.reduce((a,b)=>a+b,0)});
+    });
+  });
+  if(!rows.length){el.innerHTML='<thead><tr><th>No COGS data for this week</th></tr></thead>';return;}
+  const fmtV=v=>{if(!v||v===0)return'<span style="color:var(--gtxt)">—</span>';const cls=v>0?'color:#E8432A;font-weight:600':'color:#B8860B;font-weight:600';return`<span style="${cls}">${v>0?'+':''}${$F(v)}</span>`;};
+  let html='<thead><tr><th>Store</th><th>Product</th><th>Mon</th><th>Tue</th><th>Wed</th><th>Thu</th><th>Fri</th><th>Sat</th><th>Sun</th><th>Weekly</th></tr></thead><tbody>';
+  rows.forEach(r=>{
+    html+=`<tr><td class="sn">${r.store}</td><td><strong>${r.product}</strong></td><td>${fmtV(r.mon)}</td><td>${fmtV(r.tue)}</td><td>${fmtV(r.wed)}</td><td>${fmtV(r.thu)}</td><td>${fmtV(r.fri)}</td><td>${fmtV(r.sat)}</td><td>${fmtV(r.sun)}</td><td>${fmtV(r.weekly)}</td></tr>`;
+  });
+  html+='</tbody>';
+  el.innerHTML=html;
 }
 function bldCogsAlerts(wk,dy){
   const pd=getPD(),THRESH=75;
@@ -3253,6 +3336,11 @@ function bldTbl(id,wk,dy,cols){
         else if(col.k==='_sos'){const h=gv(d,wk,'hme',dy),k=gv(d,wk,'kio',dy);row[col.k]=h>0?h:k}
         else if(col.k==='_wowS'){if(APP.week!=='_period'&&wk){const wks=getPD().weeks||[];const wkIdx=wks.indexOf(wk);if(wkIdx>0){const pwk=wks[wkIdx-1];const pv=gv(d,pwk,'acS','all');const cv=gv(d,wk,'acS','all');row[col.k]=cv-pv;}else row[col.k]=0;}else row[col.k]=0;}
         else if(col.k==='_wowL'){if(APP.week!=='_period'&&wk){const wks=getPD().weeks||[];const wkIdx=wks.indexOf(wk);if(wkIdx>0){const pwk=wks[wkIdx-1];const pv=gv(d,pwk,'aLP','all');const cv=gv(d,wk,'aLP','all');row[col.k]=cv-pv;}else row[col.k]=0;}else row[col.k]=0;}
+        else if(col.k==='_trDelta'){row[col.k]=gv(d,wk,'alLP',dy)-gv(d,wk,'aLP',dy);}
+        else if(col.k==='_totTrH'){row[col.k]=gv(d,wk,'nsoH',dy)+gv(d,wk,'regH',dy);}
+        else if(col.k==='_totTrW'){row[col.k]=gv(d,wk,'nsoW',dy)+gv(d,wk,'regW',dy);}
+        else if(col.k==='_acTrH'){const v=gv(d,wk,'acTrH',dy);row[col.k]=v>0?v:gv(d,wk,'nsoH',dy)+gv(d,wk,'regH',dy);}
+        else if(col.k==='_trHV'){const sc=gv(d,wk,'scTrH',dy),ac=gv(d,wk,'acTrH',dy)>0?gv(d,wk,'acTrH',dy):gv(d,wk,'nsoH',dy)+gv(d,wk,'regH',dy);row[col.k]=sc>0?ac-sc:0;}
       } else row[col.k]=gv(d,wk,col.k,dy);
     });
     row._dist=getDist(s);rows.push(row);
