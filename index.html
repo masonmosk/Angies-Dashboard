@@ -2298,7 +2298,7 @@ function updCOGS(d,wk,dy){
   const L=gv(d,wk,'cgL',dy),C=gv(d,wk,'cgC',dy),S=gv(d,wk,'cgS',dy),Ch=gv(d,wk,'cgCh',dy);
   // Positive = missing product (red/bad), Negative = excess/overage (amber/warning)
   const cgBg=v=>v>0?'rgba(232,67,42,.7)':'rgba(212,168,67,.7)';
-  dstry('cCG');CH['cCG']=new Chart(document.getElementById('cCG'),{type:'bar',data:{labels:['Lobster','Chicken','Steak','Cheeses'],datasets:[{data:[L,C,S,Ch],backgroundColor:[cgBg(L),cgBg(C),cgBg(S),cgBg(Ch)],borderRadius:4}]},options:{...cOpts('$',true),plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>{const v=c.raw;return(v>0?'Missing Product: +':'Product Overage: ')+$F(v)}}}}}});
+  dstry('cCG');CH['cCG']=new Chart(document.getElementById('cCG'),{type:'bar',data:{labels:['Lobster','Chicken','Steak','Cheeses'],datasets:[{data:[L,C,S,Ch],backgroundColor:[cgBg(L),cgBg(C),cgBg(S),cgBg(Ch)],borderRadius:4}]},options:{...cOpts('$',true),plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>{const v=c.raw;return(v>0?'Missing Product: ':'Product Overage: ')+$FCG(v)}}}}}});
   // COGS Daily Breakdown Table (Mon-Sun dollar variances per store)
   bldCogsDaysTbl(wk);
   const wks=getPD().weeks||[];
@@ -2329,7 +2329,7 @@ function bldCogsDaysTbl(wk){
     });
   });
   if(!rows.length){el.innerHTML='<thead><tr><th>No COGS data for this week</th></tr></thead>';return;}
-  const fmtV=v=>{if(!v||v===0)return'<span style="color:var(--gtxt)">—</span>';const cls=v>0?'color:#E8432A;font-weight:600':'color:#B8860B;font-weight:600';return`<span style="${cls}">${v>0?'+':''}${$F(v)}</span>`;};
+  const fmtV=v=>{if(!v||v===0)return'<span style="color:var(--gtxt)">—</span>';const cls=v>0?'color:#E8432A;font-weight:600':'color:#B8860B;font-weight:600';return`<span style="${cls}">${$FCG(v)}</span>`;};
   let html='<thead><tr><th>Store</th><th>Product</th><th>Mon</th><th>Tue</th><th>Wed</th><th>Thu</th><th>Fri</th><th>Sat</th><th>Sun</th><th>Weekly</th></tr></thead><tbody>';
   rows.forEach(r=>{
     html+=`<tr><td class="sn">${r.store}</td><td><strong>${r.product}</strong></td><td>${fmtV(r.mon)}</td><td>${fmtV(r.tue)}</td><td>${fmtV(r.wed)}</td><td>${fmtV(r.thu)}</td><td>${fmtV(r.fri)}</td><td>${fmtV(r.sat)}</td><td>${fmtV(r.sun)}</td><td>${fmtV(r.weekly)}</td></tr>`;
@@ -2370,7 +2370,7 @@ function bldCogsAlerts(wk,dy){
     html+=`<tr style="background:var(--bg);border-top:2px solid var(--bdr)">
       <td class="sn" style="font-weight:700">${sg.name}</td>
       <td style="color:var(--gtxt);font-size:12px">${sg.wkSd||wk}</td>
-      <td colspan="2" style="font-size:12px;color:var(--gtxt)">${sg.items.length} item${sg.items.length>1?'s':''} flagged &nbsp;·&nbsp; Net: <strong style="${storeTotalCls}">${sg.total>0?'+':''}${$F(sg.total)}</strong></td>
+      <td colspan="2" style="font-size:12px;color:var(--gtxt)">${sg.items.length} item${sg.items.length>1?'s':''} flagged &nbsp;·&nbsp; Net: <strong style="${storeTotalCls}">${$FCG(sg.total)}</strong></td>
       <td></td>
     </tr>`;
     // Product detail rows
@@ -2382,7 +2382,7 @@ function bldCogsAlerts(wk,dy){
         <td style="padding-left:24px;color:var(--gtxt);font-size:12px">↳</td>
         <td></td>
         <td><strong>${item.product}</strong></td>
-        <td class="${isMissing?'neg':''}" ${valStyle}>${item.variance>0?'+':''}${$F(item.variance)}</td>
+        <td class="${isMissing?'neg':''}" ${valStyle}>${$FCG(item.variance)}</td>
         <td class="${isMissing?'neg':''}" ${valStyle}>${flag}</td>
       </tr>`;
     });
@@ -2464,7 +2464,7 @@ function doExportCOGSNotes(){
     // Currency format on Variance $ column (col 3)
     if(!isHdr&&!isSpacer){
       const varAddr=XLSX.utils.encode_cell({r,c:3});
-      if(ws[varAddr]&&typeof ws[varAddr].v==='number')ws[varAddr].z='"$"#,##0;[Red]"-$"#,##0';
+      if(ws[varAddr]&&typeof ws[varAddr].v==='number')ws[varAddr].z='"+"$"#,##0;[Red]"-("$"#,##0")"';
     }
   }
 
@@ -2548,7 +2548,7 @@ function renderStoreScorecard(pd,wk,wrap){
   function fH(v){return v?v.toFixed(1):'<span class="sc-blank">—</span>';}
   function fHV(v){if(!v&&v!==0)return'<span class="sc-blank">—</span>';if(Math.abs(v)<0.01)return'<span class="sc-zero">0.0</span>';const cls=v<0?'sc-pos':'sc-neg';return`<span class="${cls}">${v>=0?'+':''}${v.toFixed(1)}</span>`;}
   function fSP(v){return v?'$'+v.toFixed(1):'<span class="sc-blank">—</span>';}
-  function fCG(v){if(!v&&v!==0)return'<span class="sc-blank">—</span>';if(Math.abs(v)<0.5)return'<span class="sc-zero">$0</span>';const cls=v<0?'sc-pos':'sc-neg';return`<span class="${cls}">${v>0?'+':'-'}$${Math.abs(Math.round(v)).toLocaleString()}</span>`;}
+  function fCG(v){if(!v&&v!==0)return'<span class="sc-blank">—</span>';if(Math.abs(v)<0.5)return'<span class="sc-zero">$0</span>';const cls=v<0?'sc-pos':'sc-neg';return`<span class="${cls}">${$FCG(Math.round(v))}</span>`;}
   function fN(v){return v?Math.round(v).toLocaleString():'<span class="sc-blank">—</span>';}
   function fAcc(v,comp,txns){if(!txns)return'<span class="sc-blank">—</span>';const a=comp/txns*1000;const cls=a<=APP.goals.acc?'sc-pos':'sc-neg';return`<span class="${cls}">${a.toFixed(2)}</span>`;}
 
@@ -2754,7 +2754,7 @@ function updOpsHub(wk,dy){
   function fC(v){return v?Math.round(v).toLocaleString():'-';}
   function fT(v){return v?Math.round(v).toLocaleString():'-';}
   function fA(v){return v?v.toFixed(2):'-';}
-  function fCG(v){if(!v)return'-';return(v>0?'+$':'-$')+Math.abs(Math.round(v)).toLocaleString();}
+  function fCG(v){if(!v)return'-';return $FCG(Math.round(v));}
   function fSOS(v){return v>0?tF(v):'-';}
 
   const NC=21; // total columns (1 name + 3 sales + 4 labor + 6 speed + 3 acc + 4 cogs)
@@ -3224,7 +3224,8 @@ async function _genAndDownloadExport(prof,pd){
             else if(good){fontArgb=C.green;fillArgb=isAlt?C.greenBgAlt:C.greenBg;}
           }
           // Number formats
-          if(m.fmt==='$'||m.fmt==='$±')cell.numFmt='"$"#,##0.00;[Red]-"$"#,##0.00';
+          if(m.cat==='COGS')cell.numFmt='"+"$"#,##0;[Red]"-("$"#,##0")"';
+          else if(m.fmt==='$'||m.fmt==='$±')cell.numFmt='"$"#,##0.00;[Red]-"$"#,##0.00';
           else if(m.fmt==='$1')cell.numFmt='"$"#,##0.00';
           else if(m.fmt==='%'||m.fmt==='%±')cell.numFmt='0.00%';
           else if(m.fmt==='0'||m.fmt==='0±')cell.numFmt='#,##0.0';
@@ -3399,6 +3400,7 @@ function dstry(id){if(CH[id]){CH[id].destroy();CH[id]=null}}
 
 // FORMAT
 function $F(v){if(!v&&v!==0)return'-';const s=Math.sign(v),a=Math.abs(v);const str=a>=1000000?'$'+(a/1000000).toFixed(2)+'M':a>=1000?'$'+Math.round(a).toLocaleString():'$'+a.toFixed(0);return(s<0?'-':'')+str}
+function $FCG(v){if(!v&&v!==0)return'-';const a=Math.abs(v);const str=a>=1000000?'$'+(a/1000000).toFixed(2)+'M':a>=1000?'$'+Math.round(a).toLocaleString():'$'+a.toFixed(0);if(v>0)return'+'+str;if(v<0)return'-('+str+')';return str}
 function nF(v){return v==null?'0':Math.round(v).toLocaleString()}
 function tF(s){if(!s||s<=0)return'0:00';const m=Math.floor(s/60),sc=Math.round(s%60);return m+':'+String(sc).padStart(2,'0')}
 function avg(arr){return arr.length?arr.reduce((a,b)=>a+b,0)/arr.length:0}
@@ -3585,7 +3587,7 @@ function doExportPDF(selWks,metrics,periodKey){
     if(cogsMetrics.length>0){
       const headers=['Store',...cogsMetrics.map(m=>m.label)];
       body+=`<div class="sec-title">COGS Variance by Store</div><table><thead><tr>${headers.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>`;
-      SS.forEach(s=>{if(!pd.stores||!pd.stores[s])return;const sd=pd.stores[s];const hasData=cogsMetrics.some(m=>gv(sd,wk,m.k,'all')!==0);if(!hasData)return;const row=[SN[s]||s];cogsMetrics.forEach(m=>{const v=gv(sd,wk,m.k,'all');row.push(fmtExportVal(v,m.fmt));});body+=`<tr><td class="sn">${row[0]}</td>${row.slice(1).map((v,i)=>`<td class="${parseFloat(v)<0?'warn':'pos'}">${v}</td>`).join('')}</tr>`;});
+      SS.forEach(s=>{if(!pd.stores||!pd.stores[s])return;const sd=pd.stores[s];const hasData=cogsMetrics.some(m=>gv(sd,wk,m.k,'all')!==0);if(!hasData)return;const row=[SN[s]||s];cogsMetrics.forEach(m=>{const v=gv(sd,wk,m.k,'all');row.push($FCG(Math.round(v)));});body+=`<tr><td class="sn">${row[0]}</td>${row.slice(1).map((v,i)=>`<td class="${String(v).startsWith('-')?'warn':'pos'}">${v}</td>`).join('')}</tr>`;});
       body+=`</tbody></table>`;
     }
     body+=`</div>`;
