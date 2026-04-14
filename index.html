@@ -677,7 +677,7 @@ const SS=['Baseline','Signal','QC','Ray','Pinnacle','Central','LoneCactus','Tbir
 // Maps alternate Excel tab names → SS store keys (when Angie renames a tab in the workbook)
 const SHEET_ALIAS={'Rural':'Ray','Power':'PowerRay'};
 // Bump this whenever parseWB changes structure so old caches are automatically re-parsed
-const PARSE_VER=10;
+const PARSE_VER=11;
 const TBL_DATA={};
 const EXPORT_METRICS=[
   // Sales
@@ -1273,6 +1273,8 @@ function parseStoreList(wb){
   // Build lookup tables
   const numRev={};Object.entries(STNUM).forEach(([k,v])=>{if(v)numRev[v]=k;});
   const _snRev={};Object.entries(SN).forEach(([k,v])=>{_snRev[v.toLowerCase().trim()]=k;});
+  Object.entries(SHEET_ALIAS).forEach(([alias,sk])=>{const a=alias.toLowerCase().trim();if(!_snRev[a])_snRev[a]=sk;});
+  SS.forEach(s=>{const sl=s.toLowerCase().trim();if(!_snRev[sl])_snRev[sl]=s;});
   const _ws2=s=>s.replace(/[&#]/g,' ').split(/\s+/).filter(w=>w.length>1).sort().join('|');
 
   function _matchName(nm){
@@ -1280,8 +1282,11 @@ function parseStoreList(wb){
     const lb=nm.toLowerCase().trim();
     // Exact key
     const ex=SS.find(s=>s.toLowerCase()===lb);if(ex)return ex;
-    // Exact display name
+    // Exact display name (includes SHEET_ALIAS entries)
     if(_snRev[lb])return _snRev[lb];
+    // StartsWith (prefix overlap)
+    const dm=Object.entries(_snRev).find(([dn])=>dn.length>=4&&lb.length>=4&&(lb.startsWith(dn)||dn.startsWith(lb)));
+    if(dm)return dm[1];
     // Contains
     const cm=Object.entries(_snRev).find(([dn])=>dn.length>=5&&lb.length>=5&&(dn.includes(lb)||lb.includes(dn)));
     if(cm)return cm[1];
@@ -1608,6 +1613,9 @@ function parseSOS_Tab(wb, sheetName, resAll, yr){
 
   // ── Store name reverse lookup (display name → SS key) ──
   const _snRev={};Object.entries(SN).forEach(([k,v])=>{_snRev[v.toLowerCase().trim()]=k;});
+  // Also add SHEET_ALIAS entries and SS keys as lowercase for matching
+  Object.entries(SHEET_ALIAS).forEach(([alias,sk])=>{const a=alias.toLowerCase().trim();if(!_snRev[a])_snRev[a]=sk;});
+  SS.forEach(s=>{const sl=s.toLowerCase().trim();if(!_snRev[sl])_snRev[sl]=s;});
   function matchStore(lbl){
     if(!lbl)return null;
     // Strip leading store-number prefix ("11101 …") — keep the name part
@@ -1618,10 +1626,16 @@ function parseSOS_Tab(wb, sheetName, resAll, yr){
       const nk=Object.entries(STNUM).find(([,v])=>v===parseInt(numOnly[1]));
       return nk?nk[0]:null;
     }
+    // Also try extracting a store number from anywhere in the label
+    const embeddedNum=lbl.match(/\b(\d{5})\b/);
+    if(embeddedNum){
+      const nk=Object.entries(STNUM).find(([,v])=>v===parseInt(embeddedNum[1]));
+      if(nk)return nk[0];
+    }
     if(!lb||lb.length<3)return null;
     // 1) Exact SS key match
     const ex=SS.find(s=>s.toLowerCase().trim()===lb);if(ex)return ex;
-    // 2) Exact SN display-name match
+    // 2) Exact SN display-name match (includes SHEET_ALIAS entries)
     if(_snRev[lb])return _snRev[lb];
     // 3) StartsWith (prefix overlap)
     const dm=Object.entries(_snRev).find(([dn])=>dn.length>=4&&lb.length>=4&&(lb.startsWith(dn)||dn.startsWith(lb)));
@@ -3447,7 +3461,7 @@ function bldTbl(id,wk,dy,cols){
         else if(col.k==='_totTrH'){row[col.k]=gv(d,wk,'nsoH',dy)+gv(d,wk,'regH',dy);}
         else if(col.k==='_totTrW'){row[col.k]=gv(d,wk,'nsoW',dy)+gv(d,wk,'regW',dy);}
         else if(col.k==='_acTrH'){const v=gv(d,wk,'acTrH',dy);row[col.k]=v>0?v:gv(d,wk,'nsoH',dy)+gv(d,wk,'regH',dy);}
-        else if(col.k==='_trHV'){const sc=gv(d,wk,'scTrH',dy),ac=gv(d,wk,'acTrH',dy)>0?gv(d,wk,'acTrH',dy):gv(d,wk,'nsoH',dy)+gv(d,wk,'regH',dy);row[col.k]=sc>0?ac-sc:0;}
+        else if(col.k==='_trHV'){const sc=gv(d,wk,'scTrH',dy),ac=gv(d,wk,'acTrH',dy)>0?gv(d,wk,'acTrH',dy):gv(d,wk,'nsoH',dy)+gv(d,wk,'regH',dy);row[col.k]=(ac||sc)?ac-sc:0;}
       } else row[col.k]=gv(d,wk,col.k,dy);
     });
     row._dist=getDist(s);rows.push(row);
