@@ -121,19 +121,20 @@ input[type=file]{display:none}
 .sos-no-data{background:#fff3cd;border:1px solid #ffc107;border-radius:8px;padding:14px 16px;text-align:center;margin-bottom:14px;font-size:13px;font-weight:600;color:#856404}
 .color-preview{width:28px;height:28px;border-radius:5px;border:2px solid var(--bdr);display:inline-block;vertical-align:middle;margin-left:8px;flex-shrink:0}
 /* ─── Ops Hub ─── */
-.oh-wrap{overflow-x:auto;overflow-y:visible}
-.oh-tbl{min-width:1400px;border-collapse:collapse;font-size:11.5px;width:100%}
-.oh-tbl thead tr:first-child th{text-align:center;font-size:11px;text-transform:uppercase;letter-spacing:.4px;padding:7px 10px;color:#fff}
-.oh-tbl thead tr:second-child th{text-align:center;font-size:10.5px}
+.oh-wrap{overflow:auto;max-height:calc(100vh - 120px)}
+.oh-tbl{min-width:1400px;border-collapse:separate;border-spacing:0;font-size:11.5px;width:100%}
+.oh-tbl thead th{position:sticky;z-index:6}
+.oh-tbl thead tr:first-child th{text-align:center;font-size:11px;text-transform:uppercase;letter-spacing:.4px;padding:7px 10px;color:#fff;top:0}
+.oh-tbl thead tr:nth-child(2) th{text-align:center;font-size:10.5px;top:33px}
 .oh-tbl th,.oh-tbl td{padding:6px 10px;border-bottom:1px solid var(--bdr);white-space:nowrap}
-.oh-ttl{background:#E8432A!important;color:#fff!important;font-weight:700;font-size:12px!important;min-width:180px;position:sticky;left:0;z-index:5;text-align:left!important}
-.oh-sec{text-align:center!important;border-left:2px solid rgba(255,255,255,.2)}
+.oh-ttl{background:#E8432A!important;color:#fff!important;font-weight:700;font-size:12px!important;min-width:180px;position:sticky;left:0;top:0;z-index:10;text-align:left!important}
+.oh-sec{text-align:center!important;border-left:2px solid rgba(255,255,255,.2);border-bottom:1px solid rgba(255,255,255,.15)}
 .oh-sec-lab{background:#1B2A4A!important}
 .oh-sec-spd{background:#4a2470!important}
 .oh-sec-acc{background:#1a6040!important}
 .oh-sec-cg{background:#7a3d00!important}
-.oh-col{background:var(--navy);color:#fff;text-align:center!important;font-size:10px!important;font-weight:600;text-transform:uppercase;letter-spacing:.3px}
-.oh-col-first{text-align:left!important;min-width:180px;position:sticky;left:0;z-index:4;background:var(--navy)!important}
+.oh-col{background:var(--navy);color:#fff;text-align:center!important;font-size:10px!important;font-weight:600;text-transform:uppercase;letter-spacing:.3px;border-bottom:2px solid var(--bdr)}
+.oh-col-first{text-align:left!important;min-width:180px;position:sticky;left:0;top:33px;z-index:10;background:var(--navy)!important}
 .oh-tbl tbody td{text-align:center}
 .oh-sname{text-align:left!important;position:sticky;left:0;background:#fff;z-index:2;font-weight:600}
 .oh-tbl tr:hover td{background:#f8f9fb!important}
@@ -343,7 +344,7 @@ input[type=file]{display:none}
   .pill{padding:4px 10px;font-size:11px;flex-shrink:0}
   .tc,.cc{overflow-x:auto}
   .cw{height:200px}
-  .oh-wrap{overflow-x:auto}
+  .oh-wrap{overflow:auto;max-height:calc(100vh - 100px)}
   .sg{grid-template-columns:1fr}
 }
 @media(max-width:600px){
@@ -676,7 +677,7 @@ const SS=['Baseline','Signal','QC','Ray','Pinnacle','Central','LoneCactus','Tbir
 // Maps alternate Excel tab names → SS store keys (when Angie renames a tab in the workbook)
 const SHEET_ALIAS={'Rural':'Ray','Power':'PowerRay'};
 // Bump this whenever parseWB changes structure so old caches are automatically re-parsed
-const PARSE_VER=9;
+const PARSE_VER=10;
 const TBL_DATA={};
 const EXPORT_METRICS=[
   // Sales
@@ -910,74 +911,169 @@ function autoSaveConfig(){
   }).catch(err=>console.warn('Config save failed',err));
 }
 
-// ── Sync: push config to Manus backend so all users share districts/labels/goals ──
-async function _pushConfigToServer(){
-  try{
-    const email=localStorage.getItem('angies_auth_email')||'unknown@angies.com';
-    const payload={districts:APP.districts,labels:APP.labels,goals:APP.goals,_cfgVer:2,updatedBy:email,updatedAt:new Date().toISOString()};
-    const res=await fetch('/api/sync-config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-    if(!res.ok)throw new Error('HTTP '+res.status);
-    const json=await res.json();
-    if(json.ok)console.log('[Manus] Config synced to server');
-    else console.warn('[Manus] Config sync unexpected response:',json);
+// ── GitHub-based shared storage ──────────────────────────────────────────────
+// Replaces the old Manus backend. Uses the GitHub repo's "data" branch to
+// store config and parsed reports as JSON files. Reads are anonymous via
+// raw.githubusercontent.com; writes use a GitHub PAT stored in localStorage.
+const GH_OWNER='masonmosk',GH_REPO='Angies-Dashboard',GH_BRANCH='data';
+function _ghToken(){return localStorage.getItem('angies_gh_token')||'';}
+let _ghBranchReady=null; // shared promise so we only check/create once
+
+async function _ghEnsureBranch(){
+  if(_ghBranchReady)return _ghBranchReady;
+  _ghBranchReady=(async()=>{
+    const token=_ghToken();if(!token)throw new Error('No GitHub token');
+    // Check if data branch exists
+    const chk=await fetch(`https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/branches/${GH_BRANCH}`,{headers:{'Authorization':'token '+token}});
+    if(chk.ok)return true;
+    // Create from main
+    const mainRef=await fetch(`https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/git/refs/heads/main`,{headers:{'Authorization':'token '+token}});
+    if(!mainRef.ok)throw new Error('Cannot read main branch');
+    const mainData=await mainRef.json();
+    const create=await fetch(`https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/git/refs`,{
+      method:'POST',headers:{'Authorization':'token '+token,'Content-Type':'application/json'},
+      body:JSON.stringify({ref:'refs/heads/'+GH_BRANCH,sha:mainData.object.sha})
+    });
+    if(!create.ok)throw new Error('Branch create failed: '+create.status);
     return true;
-  }catch(err){console.warn('[Manus] Config sync failed (local-only):',err);return false;}
+  })();
+  return _ghBranchReady;
 }
 
-// ── Pull shared config from Manus backend and merge ──
+async function _ghRead(path){
+  try{
+    const url=`https://raw.githubusercontent.com/${GH_OWNER}/${GH_REPO}/${GH_BRANCH}/${path}?t=${Date.now()}`;
+    const res=await fetch(url);
+    if(!res.ok)return null;
+    return res.json();
+  }catch(e){return null;}
+}
+
+async function _ghWrite(path,data,msg){
+  const token=_ghToken();if(!token)throw new Error('No GitHub token configured — add it in Settings.');
+  await _ghEnsureBranch();
+  // Get current file SHA (needed for updates)
+  let sha=null;
+  try{
+    const ex=await fetch(`https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${path}?ref=${GH_BRANCH}`,{headers:{'Authorization':'token '+token}});
+    if(ex.ok){const d=await ex.json();sha=d.sha;}
+  }catch(e){}
+  const jsonStr=JSON.stringify(data);
+  // Base64 encode (handle unicode)
+  const bytes=new TextEncoder().encode(jsonStr);
+  let binary='';for(let i=0;i<bytes.length;i++)binary+=String.fromCharCode(bytes[i]);
+  const content=btoa(binary);
+  const body={message:msg||'Update '+path,content,branch:GH_BRANCH};
+  if(sha)body.sha=sha;
+  const res=await fetch(`https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${path}`,{
+    method:'PUT',headers:{'Authorization':'token '+token,'Content-Type':'application/json'},
+    body:JSON.stringify(body)
+  });
+  if(!res.ok){const txt=await res.text();throw new Error('GitHub API '+res.status+': '+txt);}
+  return res.json();
+}
+
+// ── Push config to GitHub ──
+async function _pushConfigToServer(){
+  try{
+    if(!_ghToken())return false;
+    const email=localStorage.getItem('angies_auth_email')||'unknown@angies.com';
+    const payload={districts:APP.districts,labels:APP.labels,goals:APP.goals,_cfgVer:2,updatedBy:email,updatedAt:new Date().toISOString()};
+    await _ghWrite('config.json',payload,'Sync config — '+email);
+    console.log('[Sync] Config pushed to GitHub');
+    return true;
+  }catch(err){console.warn('[Sync] Config push failed:',err.message);return false;}
+}
+
+// ── Pull config from GitHub and merge ──
 async function _pullConfigFromServer(){
   try{
-    const res=await fetch('/api/sync-config');
-    if(!res.ok)throw new Error('HTTP '+res.status);
-    const ct=res.headers.get('content-type')||'';
-    if(!ct.includes('application/json'))return false; // no backend
-    const json=await res.json();
-    if(!json||!json.ok)return false;
-    const cfg=json.config;
+    const cfg=await _ghRead('config.json');
     if(!cfg)return false;
     let changed=false;
-    // Merge districts — add any from server that don't exist locally (by id)
     if(cfg.districts&&Array.isArray(cfg.districts)){
+      const serverIds=new Set(cfg.districts.map(d=>d.id));
       const localIds=new Set(APP.districts.map(d=>d.id));
       cfg.districts.forEach(d=>{if(!localIds.has(d.id)){APP.districts.push(d);changed=true;}});
-      // Also update existing districts if server version is newer
       cfg.districts.forEach(sd=>{
         const ld=APP.districts.find(d=>d.id===sd.id);
         if(ld&&JSON.stringify(ld)!==JSON.stringify(sd)){Object.assign(ld,sd);changed=true;}
       });
-      // Remove local districts not on server (server is source of truth)
-      const serverIds=new Set(cfg.districts.map(d=>d.id));
       const before=APP.districts.length;
       APP.districts=APP.districts.filter(d=>serverIds.has(d.id));
       if(APP.districts.length!==before)changed=true;
     }
-    // Merge goals — server wins
     if(cfg.goals&&Object.keys(cfg.goals).length){APP.goals=Object.assign({},APP.goals,cfg.goals);changed=true;}
-    // Merge labels — server wins
     if(cfg.labels&&Object.keys(cfg.labels).length){APP.labels=Object.assign({},APP.labels,cfg.labels);changed=true;}
-    if(changed){
-      dbSaveConfig().catch(()=>{});
-      console.log('[Manus] Config pulled from server — districts/goals/labels updated');
-    }
+    if(changed){dbSaveConfig().catch(()=>{});console.log('[Sync] Config pulled from GitHub');}
     return changed;
-  }catch(err){console.warn('[Manus] Config pull failed:',err);return false;}
+  }catch(err){console.warn('[Sync] Config pull failed:',err.message);return false;}
 }
 
-// ── Sync button handler: push local config, pull server config, refresh UI ──
+// ── Push parsed report to GitHub ──
+async function _pushReport(periodKey,parsedData){
+  try{
+    if(!_ghToken())return false;
+    const email=localStorage.getItem('angies_auth_email')||'unknown@angies.com';
+    // Strip raw buffer references to keep JSON manageable
+    const clean=JSON.parse(JSON.stringify(parsedData));
+    delete clean.buffer;
+    await _ghWrite('reports/'+periodKey.replace(/[^a-zA-Z0-9_-]/g,'_')+'.json',clean,'Upload '+periodKey+' — '+email);
+    console.log('[Sync] Report pushed:',periodKey);
+    return true;
+  }catch(err){console.warn('[Sync] Report push failed:',err.message);return false;}
+}
+
+// ── Pull shared reports from GitHub ──
+let _sharedLoading=false;
+async function loadSharedReports(){
+  if(_sharedLoading)return;_sharedLoading=true;
+  try{
+    const token=_ghToken();
+    // List files in reports/ directory
+    const url=`https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/reports?ref=${GH_BRANCH}`;
+    const headers=token?{'Authorization':'token '+token}:{};
+    const res=await fetch(url,{headers});
+    if(!res.ok){_sharedLoading=false;return;}
+    const files=await res.json();
+    if(!Array.isArray(files)||!files.length){_sharedLoading=false;return;}
+    setLD(1,'Loading shared reports…');
+    let loaded=0;
+    for(const file of files){
+      if(!file.name.endsWith('.json'))continue;
+      try{
+        // Read via raw URL (no auth needed for public repo, fast)
+        const d=await _ghRead('reports/'+file.name);
+        if(!d||!d.key)continue;
+        if(APP.monthly[d.key])continue; // already have this period
+        d._v=PARSE_VER;
+        APP.monthly[d.key]=d;
+        if(d.storeNums)_mergeStoreNums(d);
+        if(!APP.period)APP.period=d.key;
+        // Cache locally (parsed only, no buffer)
+        dbSave(d.key,null,file.name,d).catch(()=>{});
+        loaded++;
+        await new Promise(r=>setTimeout(r,0)); // yield
+      }catch(err){console.warn('[Sync] Failed to load',file.name,err);}
+    }
+    if(loaded>0&&Object.keys(APP.monthly).length)showDash();
+    setLD(0);
+    console.log('[Sync] Shared reports loaded:',loaded,'of',files.length);
+  }catch(err){console.warn('[Sync] loadSharedReports error:',err.message);setLD(0);}
+  _sharedLoading=false;
+}
+
+// ── Sync button handler ──
 async function syncAll(){
   const btn=document.getElementById('btnSyncAll');
   const el=document.getElementById('dbBadge');
   if(btn)btn.disabled=true;
   if(btn)btn.textContent='☁ Syncing…';
   try{
-    // 1. Save locally first (non-fatal — don't let IndexedDB errors kill server sync)
-    try{await dbSaveConfig();}catch(e){console.warn('[Manus] Local save failed (non-fatal):',e);}
-    // 2. Push to server
+    try{await dbSaveConfig();}catch(e){}
     const pushed=await _pushConfigToServer();
-    // 3. Pull from server (picks up other users' changes)
     const pulled=await _pullConfigFromServer();
     if(pulled){
-      // Refresh UI with merged data
       renderDL();buildLocSel();
       if(typeof updDist==='function')updDist(APP.week);
       if(typeof renderCfgSettings==='function'){
@@ -994,7 +1090,7 @@ async function syncAll(){
   }catch(err){
     console.warn('Sync failed',err);
     if(el){el.textContent='⚠ Sync failed';el.classList.remove('hid');}
-    showToast('⚠ Sync failed — settings saved locally only.',4000);
+    showToast('⚠ Sync failed — '+err.message,4000);
   }
   if(btn){btn.disabled=false;btn.textContent='☁ Sync';}
 }
@@ -1118,30 +1214,20 @@ function doFile(f,extra){
       dbSave(d.key,buf,f.name,d)
         .then(()=>updDBBadge(new Date().toISOString()))
         .catch(err=>console.warn('DB save failed',err));
-      // ── Manus server sync: upload via multipart/form-data (no JSON size limits) ──
-      (async()=>{
-        try{
-          showToast('☁ Syncing to shared storage…',10000);
-          const email=localStorage.getItem('angies_auth_email')||'unknown@angies.com';
-          const blob=new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
-          const fd=new FormData();
-          fd.append('file',blob,f.name);
-          fd.append('periodKey',d.key||'');
-          fd.append('uploadedBy',email);
-          const res=await fetch('/api/upload-report',{method:'POST',body:fd});
-          const json=await res.json();
-          if(json.ok){
-            showToast('☁ Synced — all users can now see this report.',6000);
-            console.log('[Manus] Uploaded:',json.fileKey);
-          } else {
-            showToast('⚠ Sync failed — data saved locally only.',6000);
-            console.warn('[Manus] Upload error response:',json);
+      // ── GitHub sync: push parsed JSON to shared storage ──
+      if(_ghToken()){
+        (async()=>{
+          try{
+            showToast('☁ Syncing to shared storage…',10000);
+            const ok=await _pushReport(d.key,d);
+            if(ok)showToast('☁ Synced — all users can now see this report.',6000);
+            else showToast('💾 Saved locally (sync token not set).',4000);
+          }catch(err){
+            showToast('💾 Saved locally — sync failed: '+err.message,6000);
+            console.warn('[Sync] Report upload failed:',err);
           }
-        }catch(err){
-          showToast('⚠ Sync error — data saved locally only.',6000);
-          console.warn('[Manus] Server upload failed:',err);
-        }
-      })();
+        })();
+      }
     }catch(err){console.error(err);alert('Parse error: '+err.message)}
     setLD(0);
   };
@@ -1349,7 +1435,8 @@ function parseSheet(wb,name){
     'Lunch Window Time':'winL','Dinner Window Time':'winD',
     'Lunch Kiosk Time':'kioL','Dinner Kiosk Time':'kioD',
     'Accuracy Complaints':'comp','Transactions':'txns','WTD Accuracy/1000':'acc1k',
-    'Lobster':'cgL','Chicken':'cgC','Steak':'cgS','Cheeses':'cgCh'};
+    'Lobster':'cgL','Chicken':'cgC','Steak':'cgS','Cheeses':'cgCh','Cheese':'cgCh',
+    'Lobster Variance':'cgL','Chicken Variance':'cgC','Steak Variance':'cgS','Cheeses Variance':'cgCh','Cheese Variance':'cgCh'};
   const TM=new Set(['win','hme','kio','winL','winD','kioL','kioD']);
   const CM=new Set(['cgL','cgC','cgS','cgCh']);
   // Normalized MM map for fuzzy label matching (fallback when exact match fails)
@@ -1372,7 +1459,7 @@ function parseSheet(wb,name){
     }
     if(!cWk)continue;
     if(/^Training\s*\(Regular\s*&\s*NSO\)$/i.test(lbl)){inTraining=true;inCOGS=false;continue;}
-    if(lbl.includes('COGS')){inCOGS=true;inTraining=false;}
+    if(lbl.includes('COGS')||/food\s*cost/i.test(lbl)||/actual\s*vs\.?\s*theo/i.test(lbl)){inCOGS=true;inTraining=false;}
     if(lbl==='Other Metrics'){inCOGS=false;inTraining=false;}
     // Inside training section, remap generic labels to training-specific keys
     let mk;
@@ -1385,7 +1472,12 @@ function parseSheet(wb,name){
       mk=MM[lbl]||(MMN[_normLbl(lbl)]);
     }
     if(!mk)continue;
-    if(CM.has(mk)&&!inCOGS)continue;
+    // Auto-detect COGS section if we encounter a COGS product label even without header
+    if(CM.has(mk)&&!inCOGS){
+      // Look ahead: if the label is exactly a known COGS product, trust it
+      if(/^(Lobster|Chicken|Steak|Cheeses?)$/i.test(lbl)){inCOGS=true;}
+      else{continue;}
+    }
     const daily=[];
     for(let ci=3;ci<=9;ci++){daily.push(getCV(ws,r,ci,TM.has(mk)))}
     // weekly total: try col 10 first, then col 11 (some sheets offset by 1)
@@ -2424,7 +2516,9 @@ function doExportCOGSNotes(){
 
   Object.keys(byDate).forEach(dt=>{
     byDate[dt].forEach((a,i)=>{
-      rows.push([i===0?dt:'', a.num, a.storeName, a.variance, a.product, '', '']);
+      // Pre-format variance as text: +$1,234 or -($1,234)
+      const fv=$FCG(Math.round(a.variance));
+      rows.push([i===0?dt:'', a.num, a.storeName, fv, a.product, '', '']);
     });
     spacerRows.add(rows.length); // mark spacer position before pushing it
     rows.push(new Array(NUM_COLS).fill(''));
@@ -2462,10 +2556,14 @@ function doExportCOGSNotes(){
       if(!ws[addr])ws[addr]={v:'',t:'s'};
       ws[addr].s=cellS(isHdr,isAlt,c);
     }
-    // Currency format on Variance $ column (col 3)
+    // Color-code Variance $ column (col 3) — values are pre-formatted text
     if(!isHdr&&!isSpacer){
       const varAddr=XLSX.utils.encode_cell({r,c:3});
-      if(ws[varAddr]&&typeof ws[varAddr].v==='number')ws[varAddr].z='"+"$"#,##0;[Red]"-("$"#,##0")"';
+      if(ws[varAddr]&&typeof ws[varAddr].v==='string'){
+        const vStr=ws[varAddr].v;
+        const isNeg=vStr.startsWith('-(');
+        ws[varAddr].s={...cellS(false,isAlt,3),font:{sz:11,bold:true,color:{rgb:isNeg?'CC0000':'1B7A3A'}}};
+      }
     }
   }
 
@@ -2987,6 +3085,13 @@ function renderCfgSettings(){
         <label class="bs" for="impDI" style="flex:1;text-align:center;cursor:pointer;padding:8px 14px">⬆ Import JSON</label>
         <input type="file" id="impDI" accept=".json">
       </div>
+      <div class="sct" style="margin-top:22px">☁ Shared Sync (GitHub)</div>
+      <p style="font-size:12px;color:var(--gtxt);margin-bottom:10px;line-height:1.6">Enter a GitHub Personal Access Token (PAT) with <strong>repo</strong> scope to enable cross-user sync. Reports and settings will be shared via the repo's <code>data</code> branch.</p>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input type="password" id="ghTokenInput" placeholder="ghp_..." value="${_ghToken()}" style="flex:1;padding:8px 10px;border:1px solid var(--bdr);border-radius:6px;font-size:12px;font-family:monospace">
+        <button class="bp" onclick="localStorage.setItem('angies_gh_token',document.getElementById('ghTokenInput').value.trim());_ghBranchReady=null;showToast(_ghToken()?'☁ Token saved — sync enabled.':'Token cleared — local only.',3000)">Save</button>
+      </div>
+      <p style="font-size:11px;color:var(--gtxt);margin-top:6px">Token is stored in your browser only. <a href="https://github.com/settings/tokens/new?scopes=repo&description=Angies+Dashboard+Sync" target="_blank" style="color:var(--red)">Generate token →</a></p>
       <div class="sct" style="margin-top:22px">Auto-Save Data</div>
       <p style="font-size:12px;color:var(--gtxt);margin-bottom:10px;line-height:1.6">Your uploaded reports are automatically saved in your browser. Reopen the dashboard any time — your data loads instantly without re-uploading.</p>
       <button class="bs" style="width:100%;color:var(--red);border-color:var(--red)" onclick="clearSavedData()">🗑 Clear Saved Data</button>
@@ -3225,7 +3330,7 @@ async function _genAndDownloadExport(prof,pd){
             else if(good){fontArgb=C.green;fillArgb=isAlt?C.greenBgAlt:C.greenBg;}
           }
           // Number formats
-          if(m.cat==='COGS')cell.numFmt='"+"$"#,##0;[Red]"-("$"#,##0")"';
+          if(m.cat==='COGS')cell.numFmt='+"$"#,##0;[Red]"-($"#,##0")"';
           else if(m.fmt==='$'||m.fmt==='$±')cell.numFmt='"$"#,##0.00;[Red]-"$"#,##0.00';
           else if(m.fmt==='$1')cell.numFmt='"$"#,##0.00';
           else if(m.fmt==='%'||m.fmt==='%±')cell.numFmt='0.00%';
@@ -3795,72 +3900,14 @@ function exportTableToXLSX(){
 // ──────────────────────────────────────────────────────────────────────────────
 
 // Auto-load saved data on page open — only after auth passes
-// ── Manus shared backend ──────────────────────────────────────────────────
-let _sharedLoading=false;
-async function loadSharedReports(){
-  if(_sharedLoading)return;
-  _sharedLoading=true;
-  try{
-    const res=await fetch('/api/trpc/report.list?batch=1&input=%7B%220%22%3A%7B%22json%22%3Anull%7D%7D');
-    if(!res.ok){console.warn('[Manus] report.list HTTP error:',res.status);_sharedLoading=false;return;}
-    const json=await res.json();
-    const rows=(json[0]&&json[0].result&&json[0].result.data&&json[0].result.data.json)||[];
-    if(!rows.length){_sharedLoading=false;return;}
-    setLD(1,'Loading shared reports…');
-    let loaded=0;
-    for(const row of rows){
-      if(row.periodKey&&APP.monthly[row.periodKey]){continue;}
-      try{
-        // ── Fast path: use server-parsed JSON (no Excel download, safe for mobile) ──
-        if(row.parsedData){
-          const d=JSON.parse(row.parsedData);
-          d._v=PARSE_VER;
-          APP.monthly[d.key]=d;
-          if(d.storeNums)_mergeStoreNums(d);
-          if(!APP.period)APP.period=d.key;
-          loaded++;
-          console.log('[Manus] Loaded from server JSON:',d.key);
-          continue;
-        }
-        // ── Fallback: download Excel and parse client-side (all devices) ──
-        const fileRes=await fetch(row.fileUrl);
-        if(!fileRes.ok){console.warn('[Manus] Could not fetch file:',row.fileUrl,fileRes.status);continue;}
-        let buf=await fileRes.arrayBuffer();
-        // Yield before heavy parse so browser stays responsive
-        await new Promise(r=>setTimeout(r,0));
-        const bytes=new Uint8Array(buf);
-        const wb=XLSX.read(bytes,{type:'array',cellDates:false,cellNF:true,cellStyles:false});
-        const fname=(row.fileKey||'').split('/').pop()||row.fileKey;
-        const d=parseWB(wb,fname);
-        d._v=PARSE_VER;
-        APP.monthly[d.key]=d;
-        _mergeStoreNums(d);
-        if(!APP.period)APP.period=d.key;
-        // Cache parsed JSON to IndexedDB (skip raw buffer — can re-download from server)
-        // Storing only parsed data keeps IndexedDB small enough for mobile
-        dbSave(d.key,null,fname,d).catch(()=>{});
-        buf=null; // free buffer memory
-        loaded++;
-        // Yield after parse to let browser GC before next file
-        await new Promise(r=>setTimeout(r,0));
-      }catch(err){console.warn('[Manus] Failed to load report',row.fileKey,err);}
-    }
-    if(loaded>0&&Object.keys(APP.monthly).length){showDash();}
-    setLD(0);
-    console.log('[Manus] Shared reports loaded:',loaded,'of',rows.length);
-  }catch(err){console.warn('[Manus] loadSharedReports error:',err);setLD(0);}
-  _sharedLoading=false;
-}
-// On sign-in and on page load (if already signed in), load shared reports after local DB restore
 // ── Page startup: restore session for returning users ────────────────────────
 document.addEventListener('DOMContentLoaded', function() {
   const stored = localStorage.getItem(SIGNIN_KEY);
   if (stored && stored.toLowerCase().endsWith('@angies.com')) {
-    // Valid session — hide login overlay and restore dashboard
     document.getElementById('signinOv').style.display = 'none';
     document.getElementById('hdrUser').textContent = '👤 ' + stored;
     document.getElementById('btnSignOut').style.display = 'inline-block';
-    // Restore local data then load shared reports from server
+    // Restore local data, then pull shared config + reports from GitHub
     initDB()
       .then(() => {
         _pullConfigFromServer()
@@ -3873,7 +3920,6 @@ document.addEventListener('DOMContentLoaded', function() {
         loadSharedReports();
       });
   }
-  // If no valid session, the login overlay stays visible (default state)
 });
 // ─────────────────────────────────────────────────────────────────────────────
 </script>
