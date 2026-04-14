@@ -1086,7 +1086,7 @@ async function syncAll(){
       el.classList.remove('hid');
       setTimeout(()=>{el.textContent='☁ Synced '+new Date().toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});},2000);
     }
-    showToast(pushed?'☁ Settings synced — all users will see your changes.':'💾 Settings saved locally (server unavailable).',4000);
+    showToast(pushed?'☁ Settings synced — all users will see your changes.':!_ghToken()?'💾 Saved locally — add a GitHub token in Settings to enable cloud sync.':'💾 Settings saved locally (sync unavailable).',5000);
   }catch(err){
     console.warn('Sync failed',err);
     if(el){el.textContent='⚠ Sync failed';el.classList.remove('hid');}
