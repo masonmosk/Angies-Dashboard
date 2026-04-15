@@ -677,7 +677,7 @@ const SS=['Baseline','Signal','QC','Ray','Pinnacle','Central','LoneCactus','Tbir
 // Maps alternate Excel tab names → SS store keys (when Angie renames a tab in the workbook)
 const SHEET_ALIAS={'Rural':'Ray','Power':'PowerRay'};
 // Bump this whenever parseWB changes structure so old caches are automatically re-parsed
-const PARSE_VER=13;
+const PARSE_VER=14;
 const TBL_DATA={};
 const EXPORT_METRICS=[
   // Sales
@@ -1346,9 +1346,14 @@ function parseWB(wb,filenameHint){
   // Build reverse alias map: storeKey → alternate sheet name
   const _aliasRev={};Object.entries(SHEET_ALIAS).forEach(([sh,sk])=>{_aliasRev[sk]=sh;});
   SS.forEach(s=>{
-    if(wb.SheetNames.includes(s)){res.stores[s]=parseSheet(wb,s);}
-    else if(_aliasRev[s]&&wb.SheetNames.includes(_aliasRev[s])){res.stores[s]=parseSheet(wb,_aliasRev[s]);}
+    try{
+      if(wb.SheetNames.includes(s)){res.stores[s]=parseSheet(wb,s);}
+      else if(_aliasRev[s]&&wb.SheetNames.includes(_aliasRev[s])){res.stores[s]=parseSheet(wb,_aliasRev[s]);}
+      else{console.warn('[Parse] No sheet for store:',s,'alias:',_aliasRev[s]||'none');}
+    }catch(err){console.error('[Parse] Error parsing store:',s,err);}
   });
+  console.log('[Parse] Stores parsed:',Object.keys(res.stores).length,'of',SS.length,
+    'PowerRay:',res.stores['PowerRay']?Object.keys(res.stores['PowerRay']).length+' weeks':'MISSING');
 
   // Override SOS metrics from dedicated Window / Kiosk sheet tabs
   function _applySOS(sheetName,metL,metD){
