@@ -677,7 +677,7 @@ const SS=['Baseline','Signal','QC','Ray','Pinnacle','Central','LoneCactus','Tbir
 // Maps alternate Excel tab names → SS store keys (when Angie renames a tab in the workbook)
 const SHEET_ALIAS={'Rural':'Ray','Power':'PowerRay'};
 // Bump this whenever parseWB changes structure so old caches are automatically re-parsed
-const PARSE_VER=12;
+const PARSE_VER=13;
 const TBL_DATA={};
 const EXPORT_METRICS=[
   // Sales
@@ -1680,28 +1680,47 @@ function parseSOS_Tab(wb, sheetName, resAll, yr){
   let cStore=null;
 
   const _sawInStoreCol=new Set();
+  // Also scan col A for store names in addition to the detected _cStore column,
+  // because some sheets have mixed layouts (e.g. newer stores in col A, older in col B)
+  const _storeCols=[_cStore];
+  if(_cStore!==0)_storeCols.push(0);
+  if(_cStore!==1)_storeCols.push(1);
+
   for(let r=0;r<=maxR;r++){
-    // Store name column
-    const sc=ws[XLSX.utils.encode_cell({r,c:_cStore})];
-    if(sc&&sc.v!=null){
-      const s=String(sc.v).trim();
-      if(s&&s.length>1){
-        _sawInStoreCol.add(s);
-        const sm=matchStore(s);
-        if(sm){
-          // Only update cStore if it changed (new layout repeats store name on every row)
-          if(cStore!==sm){cStore=sm;if(!acc[cStore])acc[cStore]={};}
-          // In new layout the store name IS on this same row as the label — don't continue, fall through
-          if(_layout==='classic')continue;
+    // Store name column — check primary column AND alternates
+    let foundStore=false;
+    for(const sc_col of _storeCols){
+      const sc=ws[XLSX.utils.encode_cell({r,c:sc_col})];
+      if(sc&&sc.v!=null){
+        const s=String(sc.v).trim();
+        if(s&&s.length>1){
+          _sawInStoreCol.add(s);
+          const sm=matchStore(s);
+          if(sm){
+            if(cStore!==sm){cStore=sm;if(!acc[cStore])acc[cStore]={};}
+            foundStore=true;
+            break; // matched in this column, stop checking alternates
+          }
         }
       }
     }
+    if(foundStore&&_layout==='classic')continue;
     if(!cStore)continue;
 
-    // Meal label column
-    const lc=ws[XLSX.utils.encode_cell({r,c:_cLabel})];
-    if(!lc||lc.v==null)continue;
-    const lbl=String(lc.v).trim();
+    // Meal label column — check primary label col AND nearby cols for lunch/dinner keywords
+    let lbl=null;
+    const _labelCols=[_cLabel];
+    if(_cLabel!==1)_labelCols.push(1);
+    if(_cLabel!==2)_labelCols.push(2);
+    if(_cLabel!==3)_labelCols.push(3);
+    for(const lc_col of _labelCols){
+      const lc=ws[XLSX.utils.encode_cell({r,c:lc_col})];
+      if(lc&&lc.v!=null){
+        const v=String(lc.v).trim();
+        if(/\b(lunch|dinner)\b/i.test(v)){lbl=v;break;}
+      }
+    }
+    if(!lbl)continue;
     // Skip combined "Total-Lunch/dinner" rows — they match both lunch and dinner regex
     // but are a blended average, not a peak measurement; including them corrupts both metrics
     if(/total[-\s/]*(lunch|dinner)/i.test(lbl))continue;
@@ -1721,6 +1740,8 @@ function parseSOS_Tab(wb, sheetName, resAll, yr){
   // Diagnose store matching
   _sawInStoreCol.forEach(s=>{const sm=matchStore(s);if(sm)dbg.storesMatched.push(`"${s}"→${sm}`);else dbg.storesMissed.push(`"${s}"`);});
   dbg.storesFound=[..._sawInStoreCol];
+  dbg.storeCols=_storeCols;
+  dbg.accStores=Object.keys(acc);
 
   // Convert accumulated day values to weekly averages
   const map={};
