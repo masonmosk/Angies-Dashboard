@@ -677,7 +677,7 @@ const SS=['Baseline','Signal','QC','Ray','Pinnacle','Central','LoneCactus','Tbir
 // Maps alternate Excel tab names → SS store keys (when Angie renames a tab in the workbook)
 const SHEET_ALIAS={'Rural':'Ray','Power':'PowerRay'};
 // Bump this whenever parseWB changes structure so old caches are automatically re-parsed
-const PARSE_VER=11;
+const PARSE_VER=12;
 const TBL_DATA={};
 const EXPORT_METRICS=[
   // Sales
@@ -1356,7 +1356,18 @@ function parseWB(wb,filenameHint){
     if(!sos)return;
     const{hasStores,map}=sos;
     if(hasStores){
-      // Merge per-store lunch/dinner into res.stores, then rebuild res.all averages
+      // Clear SOS metrics from ALL individual store sheets first — they often contain
+      // company averages, not store-specific data.  The dedicated SOS tab is the source of truth.
+      SS.forEach(s=>{
+        if(!res.stores[s])return;
+        Object.keys(res.stores[s]).forEach(wk=>{
+          if(res.stores[s][wk]&&res.stores[s][wk].m){
+            delete res.stores[s][wk].m[metL];
+            delete res.stores[s][wk].m[metD];
+          }
+        });
+      });
+      // Now apply per-store data from the dedicated SOS tab
       Object.entries(map).forEach(([store,wkMap])=>{
         if(!res.stores[store])return;
         Object.entries(wkMap).forEach(([wk,vals])=>{
@@ -1612,14 +1623,15 @@ function parseSOS_Tab(wb, sheetName, resAll, yr){
   dbg.colMapCount=Object.keys(colMap).length;
 
   // ── Store name reverse lookup (display name → SS key) ──
-  const _snRev={};Object.entries(SN).forEach(([k,v])=>{_snRev[v.toLowerCase().trim()]=k;});
+  const _snRev={};Object.entries(SN).forEach(([k,v])=>{_snRev[v.toLowerCase().replace(/\s+/g,' ').trim()]=k;});
   // Also add SHEET_ALIAS entries and SS keys as lowercase for matching
-  Object.entries(SHEET_ALIAS).forEach(([alias,sk])=>{const a=alias.toLowerCase().trim();if(!_snRev[a])_snRev[a]=sk;});
-  SS.forEach(s=>{const sl=s.toLowerCase().trim();if(!_snRev[sl])_snRev[sl]=s;});
+  Object.entries(SHEET_ALIAS).forEach(([alias,sk])=>{const a=alias.toLowerCase().replace(/\s+/g,' ').trim();if(!_snRev[a])_snRev[a]=sk;});
+  SS.forEach(s=>{const sl=s.toLowerCase().replace(/\s+/g,' ').trim();if(!_snRev[sl])_snRev[sl]=s;});
   function matchStore(lbl){
     if(!lbl)return null;
     // Strip leading store-number prefix ("11101 …") — keep the name part
-    let lb=lbl.replace(/^\d{4,6}\s+/,'').toLowerCase().trim();
+    // Normalize whitespace (collapse multiple spaces, tabs, etc.)
+    let lb=lbl.replace(/^\d{4,6}\s+/,'').toLowerCase().replace(/\s+/g,' ').trim();
     // Handle asterisk-wrapped store numbers like "*15101*" — look up by STNUM
     const numOnly=lbl.match(/^\*?(\d{4,6})\*?$/);
     if(numOnly){
