@@ -677,7 +677,7 @@ const SS=['Baseline','Signal','QC','Ray','Pinnacle','Central','LoneCactus','Tbir
 // Maps alternate Excel tab names → SS store keys (when Angie renames a tab in the workbook)
 const SHEET_ALIAS={'Rural':'Ray','Power':'PowerRay'};
 // Bump this whenever parseWB changes structure so old caches are automatically re-parsed
-const PARSE_VER=14;
+const PARSE_VER=15;
 const TBL_DATA={};
 const EXPORT_METRICS=[
   // Sales
@@ -1694,11 +1694,13 @@ function parseSOS_Tab(wb, sheetName, resAll, yr){
   for(let r=0;r<=maxR;r++){
     // Store name column — check primary column AND alternates
     let foundStore=false;
+    let anyStoreColValue=false; // track if ANY store column has a value
     for(const sc_col of _storeCols){
       const sc=ws[XLSX.utils.encode_cell({r,c:sc_col})];
       if(sc&&sc.v!=null){
         const s=String(sc.v).trim();
         if(s&&s.length>1){
+          anyStoreColValue=true;
           _sawInStoreCol.add(s);
           const sm=matchStore(s);
           if(sm){
@@ -1710,7 +1712,22 @@ function parseSOS_Tab(wb, sheetName, resAll, yr){
       }
     }
     if(foundStore&&_layout==='classic')continue;
+    // If no store name was found on this row AND the label column is also empty, reset cStore
+    // This prevents "Total Company" rows (which appear after a blank separator row) from
+    // being attributed to the last matched store
+    if(!foundStore&&!anyStoreColValue){
+      const lc=ws[XLSX.utils.encode_cell({r,c:_cLabel})];
+      if(!lc||lc.v==null||String(lc.v).trim()===''){cStore=null;}
+    }
     if(!cStore)continue;
+    // Also skip rows where ANY column 0-4 contains "Total Company", "Grand Total" etc.
+    // to avoid aggregate rows being attributed to the last individual store
+    let isAggRow=false;
+    for(let tc=0;tc<=Math.min(4,rng.e.c);tc++){
+      const cell=ws[XLSX.utils.encode_cell({r,c:tc})];
+      if(cell&&cell.v!=null&&/\b(total\s*company|grand\s*total|all\s*stores?)\b/i.test(String(cell.v))){isAggRow=true;break;}
+    }
+    if(isAggRow){cStore=null;continue;}
 
     // Meal label column — check primary label col AND nearby cols for lunch/dinner keywords
     let lbl=null;
