@@ -677,7 +677,7 @@ const SS=['Baseline','Signal','QC','Ray','Pinnacle','Central','LoneCactus','Tbir
 // Maps alternate Excel tab names → SS store keys (when Angie renames a tab in the workbook)
 const SHEET_ALIAS={'Rural':'Ray','Power':'PowerRay'};
 // Bump this whenever parseWB changes structure so old caches are automatically re-parsed
-const PARSE_VER=15;
+const PARSE_VER=16;
 const TBL_DATA={};
 const EXPORT_METRICS=[
   // Sales
@@ -1280,20 +1280,22 @@ function parseStoreList(wb){
   function _matchName(nm){
     if(!nm)return null;
     const lb=nm.toLowerCase().trim();
+    // Skip non-store entries (food trucks, trailers, etc.)
+    if(/\b(truck|trailer|food\s*truck)\b/i.test(lb))return null;
     // Exact key
     const ex=SS.find(s=>s.toLowerCase()===lb);if(ex)return ex;
     // Exact display name (includes SHEET_ALIAS entries)
     if(_snRev[lb])return _snRev[lb];
-    // StartsWith (prefix overlap)
-    const dm=Object.entries(_snRev).find(([dn])=>dn.length>=4&&lb.length>=4&&(lb.startsWith(dn)||dn.startsWith(lb)));
-    if(dm)return dm[1];
-    // Contains
-    const cm=Object.entries(_snRev).find(([dn])=>dn.length>=5&&lb.length>=5&&(dn.includes(lb)||lb.includes(dn)));
-    if(cm)return cm[1];
-    // Word-set equality (handles reversed names)
+    // Word-set equality (handles reversed names) — stricter than contains
     const lbW=_ws2(lb);
     const wm=Object.entries(_snRev).find(([dn])=>_ws2(dn)===lbW);
     if(wm)return wm[1];
+    // StartsWith (prefix overlap)
+    const dm=Object.entries(_snRev).find(([dn])=>dn.length>=4&&lb.length>=4&&(lb.startsWith(dn)||dn.startsWith(lb)));
+    if(dm)return dm[1];
+    // Contains — last resort, only if no better match found
+    const cm=Object.entries(_snRev).find(([dn])=>dn.length>=5&&lb.length>=5&&(dn.includes(lb)||lb.includes(dn)));
+    if(cm)return cm[1];
     return null;
   }
 
@@ -1310,7 +1312,9 @@ function parseStoreList(wb){
       const nmCell=ws[XLSX.utils.encode_cell({r,c:1})];
       sk=nmCell&&nmCell.v?_matchName(String(nmCell.v)):null;
     }
-    if(sk)result[sk]=num;
+    // Don't overwrite an existing mapping with a new number — first-match-wins
+    // (protects against later rows like food trucks matching an already-assigned store)
+    if(sk&&!result[sk])result[sk]=num;
   }
   return result;
 }
@@ -3575,7 +3579,7 @@ function dstry(id){if(CH[id]){CH[id].destroy();CH[id]=null}}
 
 // FORMAT
 function $F(v){if(!v&&v!==0)return'-';const s=Math.sign(v),a=Math.abs(v);const str=a>=1000000?'$'+(a/1000000).toFixed(2)+'M':a>=1000?'$'+Math.round(a).toLocaleString():'$'+a.toFixed(0);return(s<0?'-':'')+str}
-function $FCG(v){if(!v&&v!==0)return'-';const a=Math.abs(v);const str=a>=1000000?'$'+(a/1000000).toFixed(2)+'M':a>=1000?'$'+Math.round(a).toLocaleString():'$'+a.toFixed(0);if(v>0)return'+'+str;if(v<0)return'-('+str+')';return str}
+function $FCG(v){if(!v&&v!==0)return'-';const a=Math.abs(v);const str=a>=1000000?'$'+(a/1000000).toFixed(2)+'M':a>=1000?'$'+Math.round(a).toLocaleString():'$'+a.toFixed(0);if(v>0)return'+'+str;if(v<0)return'('+str+')';return str}
 function nF(v){return v==null?'0':Math.round(v).toLocaleString()}
 function tF(s){if(!s||s<=0)return'0:00';const m=Math.floor(s/60),sc=Math.round(s%60);return m+':'+String(sc).padStart(2,'0')}
 function avg(arr){return arr.length?arr.reduce((a,b)=>a+b,0)/arr.length:0}
@@ -3762,7 +3766,7 @@ function doExportPDF(selWks,metrics,periodKey){
     if(cogsMetrics.length>0){
       const headers=['Store',...cogsMetrics.map(m=>m.label)];
       body+=`<div class="sec-title">COGS Variance by Store</div><table><thead><tr>${headers.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>`;
-      SS.forEach(s=>{if(!pd.stores||!pd.stores[s])return;const sd=pd.stores[s];const hasData=cogsMetrics.some(m=>gv(sd,wk,m.k,'all')!==0);if(!hasData)return;const row=[SN[s]||s];cogsMetrics.forEach(m=>{const v=gv(sd,wk,m.k,'all');row.push($FCG(Math.round(v)));});body+=`<tr><td class="sn">${row[0]}</td>${row.slice(1).map((v,i)=>`<td class="${String(v).startsWith('-')?'warn':'pos'}">${v}</td>`).join('')}</tr>`;});
+      SS.forEach(s=>{if(!pd.stores||!pd.stores[s])return;const sd=pd.stores[s];const hasData=cogsMetrics.some(m=>gv(sd,wk,m.k,'all')!==0);if(!hasData)return;const row=[SN[s]||s];cogsMetrics.forEach(m=>{const v=gv(sd,wk,m.k,'all');row.push($FCG(Math.round(v)));});body+=`<tr><td class="sn">${row[0]}</td>${row.slice(1).map((v,i)=>`<td class="${String(v).startsWith('(')?'warn':'pos'}">${v}</td>`).join('')}</tr>`;});
       body+=`</tbody></table>`;
     }
     body+=`</div>`;
