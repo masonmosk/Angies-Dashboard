@@ -2821,8 +2821,8 @@ function renderStoreScorecard(pd,wk,wrap){
     ${row('Hrs Variance',hVDay.map(v=>v!=null?fHV(v):'<span class="sc-blank">—</span>'),wv('wtdHV')!==0?fHV(wv('wtdHV')):'<span class="sc-blank">—</span>')}
     ${row('Needed Cut/Add',da('needH').map(v=>fHV(v)),fHV(wv('needH')),'sc-proj-row')}
     <tr><td colspan="9" style="padding:3px;background:#f0f3fa;border-bottom:1px solid var(--bdr)"></td></tr>
-    ${row('Training Sched Hrs',da('scH').map((_,i)=>{const nso=dv('nsoH',i),reg=dv('regH',i);return(nso||reg)?fH(nso+reg):'<span class="sc-blank">—</span>';}),fH((wv('nsoH')||0)+(wv('regH')||0)),'sc-proj-row')}
-    ${row('Training Actual Hrs',da('acH').map((_,i)=>{const nso=dv('nsoH',i),reg=dv('regH',i);return(nso||reg)?fH(nso+reg):'<span class="sc-blank">—</span>';}),(wv('nsoH')||0)+(wv('regH')||0)?fH((wv('nsoH')||0)+(wv('regH')||0)):'<span class="sc-blank">—</span>')}
+    ${row('Training Sched Hrs',da('scTrH').map(v=>v?fH(v):'<span class="sc-blank">—</span>'),wv('scTrH')?fH(wv('scTrH')):'<span class="sc-blank">—</span>','sc-proj-row')}
+    ${row('Training Actual Hrs',da('acTrH').map((v,i)=>{const ac=v||(dv('nsoH',i)+dv('regH',i));return ac?fH(ac):'<span class="sc-blank">—</span>';}),(function(){const ac=wv('acTrH')||((wv('nsoH')||0)+(wv('regH')||0));return ac?fH(ac):'<span class="sc-blank">—</span>';})())}
     </tbody></table>
   </div>`;
 
