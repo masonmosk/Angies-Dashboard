@@ -677,7 +677,7 @@ const SS=['Baseline','Signal','QC','Ray','Pinnacle','Central','LoneCactus','Tbir
 // Maps alternate Excel tab names → SS store keys (when Angie renames a tab in the workbook)
 const SHEET_ALIAS={'Rural':'Ray','Power':'PowerRay'};
 // Bump this whenever parseWB changes structure so old caches are automatically re-parsed
-const PARSE_VER=16;
+const PARSE_VER=17;
 const TBL_DATA={};
 const EXPORT_METRICS=[
   // Sales
@@ -1907,18 +1907,24 @@ function gv(data,wk,mk,dy){
   // multi-day array
   if(Array.isArray(dy)){
     const vals=dy.map(i=>m.d&&(m.d[+i]||0));
-    const nz=vals.filter(v=>v>0);
+    // For rate metrics (labor %, SOS times) only positives are valid data;
+    // for counts/dollars (including COGS variance which can be negative),
+    // any non-zero value should count.
+    const nz=RATE_MK.has(mk)?vals.filter(v=>v>0):vals.filter(v=>v!==0);
     if(!nz.length)return 0;
     return RATE_MK.has(mk)?nz.reduce((a,b)=>a+b,0)/nz.length:vals.reduce((a,b)=>a+b,0);
   }
   if(dy==='all'||dy==='wtd'){
     // try weekly total first; if 0, fallback to summing/averaging dailies
     if(m.w)return m.w;
-    const d=m.d||[];const nz=d.filter(v=>v>0);
+    const d=m.d||[];
+    const nz=RATE_MK.has(mk)?d.filter(v=>v>0):d.filter(v=>v!==0);
     if(!nz.length)return 0;
     return RATE_MK.has(mk)?nz.reduce((a,b)=>a+b,0)/nz.length:d.reduce((a,b)=>a+b,0);
   }
-  return(m.d&&m.d[+dy])||0;
+  // Explicit falsy-safe return so negatives (e.g. COGS -$34) pass through
+  const dv=m.d&&m.d[+dy];
+  return dv==null?0:dv;
 }
 function gda(data,wk,mk){
   if(wk==='_period'){
