@@ -677,7 +677,7 @@ const SS=['Baseline','Signal','QC','Ray','Pinnacle','Central','LoneCactus','Tbir
 // Maps alternate Excel tab names → SS store keys (when Angie renames a tab in the workbook)
 const SHEET_ALIAS={'Rural':'Ray','Power':'PowerRay'};
 // Bump this whenever parseWB changes structure so old caches are automatically re-parsed
-const PARSE_VER=17;
+const PARSE_VER=18;
 const TBL_DATA={};
 const EXPORT_METRICS=[
   // Sales
@@ -1425,7 +1425,7 @@ function parseSheet(wb,name){
   const rng=XLSX.utils.decode_range(ws['!ref']);
   const maxR=Math.min(rng.e.r,499);
   const wks={};
-  let cWk=null,wNum=0,inCOGS=false,inTraining=false;
+  let cWk=null,wNum=0,inCOGS=false,inTraining=false,inAllIn=false;
   const MM={'Projected Sales':'pjS','Actual Sales':'acS','Sales Variance':'svD',
     'Lobster Revenue':'lob','Prime Revenue':'pri','Burger Revenue':'bur','Chicken Revenue':'chk','Beverage + Discount Revenue':'bev',
     'Sales - Last Year':'sLY','Sales - This Year':'sTY',
@@ -1475,7 +1475,7 @@ function parseSheet(wb,name){
     if(/^Week\s+\d+$/i.test(lbl)){
       const dc=ws[XLSX.utils.encode_cell({r,c:3})];
       if(dc&&dc.v==='Monday'){
-        wNum++;cWk='Week '+wNum;inCOGS=false;inTraining=false;
+        wNum++;cWk='Week '+wNum;inCOGS=false;inTraining=false;inAllIn=false;
         const dtc=ws[XLSX.utils.encode_cell({r:r+1,c:3})];
         let sd='';
         if(dtc&&typeof dtc.v==='number'&&dtc.v>40000)sd=fmtEDate(dtc.v);
@@ -1483,15 +1483,23 @@ function parseSheet(wb,name){
       }
     }
     if(!cWk)continue;
-    if(/^Training\s*\(Regular\s*&\s*NSO\)$/i.test(lbl)){inTraining=true;inCOGS=false;continue;}
-    if(lbl.includes('COGS')||/food\s*cost/i.test(lbl)||/actual\s*vs\.?\s*theo/i.test(lbl)){inCOGS=true;inTraining=false;}
-    if(lbl==='Other Metrics'){inCOGS=false;inTraining=false;}
+    // Section detection — order matters (Training before COGS before Labor-AllIn)
+    if(/^Training\s*\(Regular\s*&\s*NSO\)$/i.test(lbl)){inTraining=true;inCOGS=false;inAllIn=false;continue;}
+    if(lbl.includes('COGS')||/food\s*cost/i.test(lbl)||/actual\s*vs\.?\s*theo/i.test(lbl)){inCOGS=true;inTraining=false;inAllIn=false;}
+    if(/^Labor\s*[-–—]?\s*All[\s-]?In$/i.test(lbl)){inAllIn=true;inTraining=false;inCOGS=false;continue;}
+    if(/^Labor\s*[-–—]?\s*excl\.?\s*Training/i.test(lbl)){inAllIn=false;inTraining=false;inCOGS=false;continue;}
+    if(lbl==='Other Metrics'){inCOGS=false;inTraining=false;inAllIn=false;}
     // Inside training section, remap generic labels to training-specific keys
     let mk;
     if(inTraining){
       if(/^Scheduled\s+Hours?$/i.test(lbl)||/^Scheduled\s+Hrs?$/i.test(lbl))mk='scTrH';
       else if(/^Actual\s+Hours?$/i.test(lbl)||/^Actual\s+Hrs?$/i.test(lbl))mk='acTrH';
       else if(/^Variance$/i.test(lbl))mk='trHV';
+      else mk=MM[lbl]||(MMN[_normLbl(lbl)]);
+    } else if(inAllIn){
+      // In the "Labor - All In" section, duplicate labor labels map to the all-in keys
+      if(/^Projected\s+Labor\s*%/i.test(lbl))mk='plLP';
+      else if(/^Actual\s+Labor\s*%/i.test(lbl))mk='alLP';
       else mk=MM[lbl]||(MMN[_normLbl(lbl)]);
     } else {
       mk=MM[lbl]||(MMN[_normLbl(lbl)]);
