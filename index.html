@@ -156,6 +156,32 @@ input[type=file]{display:none}
 .oh-tbl tr.oh-sel-row td{outline:2px solid var(--red);outline-offset:-1px}
 /* Ops Hub sub-tabs */
 .oh-subtabs{display:flex;gap:6px;margin-bottom:12px}
+/* ─── Compare tab ─── */
+.cmp-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px}
+@media(max-width:800px){.cmp-grid{grid-template-columns:1fr}}
+.cmp-card{background:var(--wh);border:1px solid var(--bdr);border-radius:10px;padding:14px;position:relative;overflow:hidden}
+.cmp-card-hdr{position:absolute;top:0;left:0;color:#fff;font-weight:700;font-size:11px;letter-spacing:1px;padding:3px 10px;border-radius:0 0 6px 0}
+.cmp-selectors{display:grid;grid-template-columns:1fr 1fr 1.5fr;gap:10px;margin-top:22px}
+@media(max-width:600px){.cmp-selectors{grid-template-columns:1fr}}
+.cmp-selectors label{display:flex;flex-direction:column;gap:3px}
+.cmp-lbl{font-size:10px;font-weight:700;color:var(--gtxt);text-transform:uppercase;letter-spacing:.3px}
+.cmp-selectors select{padding:6px 8px;border:1px solid var(--bdr);border-radius:6px;font-size:12px;background:var(--wh);color:var(--navy)}
+.cmp-metrics-wrap{background:var(--wh);border:1px solid var(--bdr);border-radius:10px;padding:10px 14px;margin-bottom:14px}
+.cmp-metrics{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px;margin-top:10px}
+.cmp-metric-group{border:1px solid var(--bdr);border-radius:8px;padding:8px 10px;background:#fafbfd}
+.cmp-metric-group-hdr{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--navy);margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid var(--bdr);display:flex;justify-content:space-between;align-items:center}
+.cmp-metric-group-toggle{font-size:9px;color:var(--red);cursor:pointer;font-weight:600;text-transform:none;letter-spacing:0}
+.cmp-metric-item{display:flex;align-items:center;gap:6px;padding:3px 0;font-size:12px;cursor:pointer;color:var(--navy)}
+.cmp-metric-item input{cursor:pointer;accent-color:var(--red)}
+#cmpTbl th{background:var(--navy);color:#fff;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.3px;padding:8px 10px}
+#cmpTbl th.cmp-num,#cmpTbl td.cmp-num{text-align:right;white-space:nowrap}
+#cmpTbl td{padding:7px 10px;font-size:12.5px;border-bottom:1px solid var(--bdr)}
+#cmpTbl tr:nth-child(even) td{background:#f7f8fb}
+.cmp-delta-pos{color:#1a6a35;font-weight:600}
+.cmp-delta-neg{color:#b81e08;font-weight:600}
+.cmp-delta-neu{color:var(--gtxt)}
+.cmp-metric-label{color:var(--navy);font-weight:600}
+.cmp-metric-cat{color:var(--gtxt);font-size:10px;text-transform:uppercase;letter-spacing:.4px;margin-right:8px;padding:2px 6px;background:#eef1f7;border-radius:4px;display:inline-block;min-width:54px;text-align:center}
 .oh-st{padding:5px 16px;border-radius:20px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid var(--bdr);background:var(--wh);color:var(--navy);transition:all .18s}
 .oh-st.on{background:var(--red);color:#fff;border-color:var(--red)}
 .oh-st:hover:not(.on){background:#f0f3fa}
@@ -523,6 +549,7 @@ input[type=file]{display:none}
     <div class="stab" data-s="cogs">COGS</div>
     <div class="stab" data-s="acc">Accuracy</div>
     <div class="stab" data-s="ranks">Store Rankings</div>
+    <div class="stab" data-s="compare">⇄ Compare</div>
   </div>
   <div class="cnt">
 
@@ -663,6 +690,43 @@ input[type=file]{display:none}
         <button class="oh-st" id="ohSt1" onclick="setOhSub(1)">📊 Store Detail</button>
       </div>
       <div id="opsHubWrap"><div style="text-align:center;padding:60px;color:var(--gtxt);font-size:13px">Upload your weekly Excel file to view the Operations Hub.</div></div>
+    </div>
+
+    <div class="pan" id="pan-compare">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:10px">
+        <div class="ct" style="margin-bottom:0">⇄ Comparison — side-by-side lookup</div>
+        <div style="display:flex;gap:8px">
+          <button class="bp" onclick="cmpSwap()" title="Swap A ↔ B">⇅ Swap</button>
+          <button class="bp" onclick="cmpSelectAll(true)">Select all metrics</button>
+          <button class="bp" onclick="cmpSelectAll(false)">Clear all</button>
+        </div>
+      </div>
+      <div class="cmp-grid">
+        <div class="cmp-card" data-cmp="A">
+          <div class="cmp-card-hdr" style="background:#E8432A">A</div>
+          <div class="cmp-selectors">
+            <label><span class="cmp-lbl">Period</span><select id="cmpAPeriod" onchange="cmpOnChange('A','period')"></select></label>
+            <label><span class="cmp-lbl">Week</span><select id="cmpAWeek" onchange="cmpOnChange('A','week')"></select></label>
+            <label><span class="cmp-lbl">Location</span><select id="cmpALoc" onchange="cmpOnChange('A','loc')"></select></label>
+          </div>
+        </div>
+        <div class="cmp-card" data-cmp="B">
+          <div class="cmp-card-hdr" style="background:#1B2A4A">B</div>
+          <div class="cmp-selectors">
+            <label><span class="cmp-lbl">Period</span><select id="cmpBPeriod" onchange="cmpOnChange('B','period')"></select></label>
+            <label><span class="cmp-lbl">Week</span><select id="cmpBWeek" onchange="cmpOnChange('B','week')"></select></label>
+            <label><span class="cmp-lbl">Location</span><select id="cmpBLoc" onchange="cmpOnChange('B','loc')"></select></label>
+          </div>
+        </div>
+      </div>
+      <details class="cmp-metrics-wrap" open>
+        <summary style="cursor:pointer;padding:8px 0;font-weight:600;color:var(--navy);font-size:13px">Metrics to compare <span id="cmpMetricCount" style="color:var(--gtxt);font-weight:400;font-size:12px"></span></summary>
+        <div class="cmp-metrics" id="cmpMetricsBox"></div>
+      </details>
+      <div class="tc" style="margin-top:14px">
+        <div class="ct">Comparison</div>
+        <table class="dt" id="cmpTbl"></table>
+      </div>
     </div>
 
   </div><!-- end dashContent -->
@@ -1840,6 +1904,7 @@ function showDash(){
   document.getElementById('lastUpd').classList.remove('hid');
   document.getElementById('hdrSub').textContent=Object.keys(APP.monthly).join(' · ')+' — Daily Reporting';
   buildPerTabs();buildLocSel();buildWkPills();
+  if(typeof initCompare==='function')initCompare();
   if(!APP._listenersReady){setupListeners();APP._listenersReady=true;}
   update();
 }
@@ -2074,6 +2139,231 @@ function goTabWithLoc(s,locKey){
   // Scroll to top of content area so the user sees the tab they navigated to
   const cnt=document.querySelector('.cnt');if(cnt)cnt.scrollIntoView({behavior:'smooth',block:'start'});
 }
+// ══════════════════════════════════════════════════════════════════════════
+// COMPARE TAB — side-by-side store/district/week/period comparison
+// ══════════════════════════════════════════════════════════════════════════
+const CMP_STORE_KEY='angies_cmp_metrics';
+const CMP_DEFAULT=['acS','_sVP','aLP','alLP','aSP','_hV','cars','_acc','cgL','cgC','cgS','cgCh'];
+const CMP={A:{period:null,week:null,loc:'AllStores'},B:{period:null,week:null,loc:'AllStores'},metrics:null,_initialized:false};
+
+function _cmpLoadMetrics(){
+  try{const s=localStorage.getItem(CMP_STORE_KEY);if(s){const a=JSON.parse(s);if(Array.isArray(a))return a;}}catch(e){}
+  return CMP_DEFAULT.slice();
+}
+function _cmpSaveMetrics(){try{localStorage.setItem(CMP_STORE_KEY,JSON.stringify(CMP.metrics));}catch(e){}}
+
+// Retrieve the data object for a given period+location (mirrors getLData but parameterized)
+function cmpGetData(periodKey,locKey){
+  const pd=APP.monthly[periodKey];
+  if(!pd||!pd.all)return null;
+  if(locKey==='AllStores')return pd.all;
+  const di=APP.districts.find(d=>d.id===locKey);
+  if(di)return aggStores(pd,di.stores);
+  return(pd.stores&&pd.stores[locKey])||null;
+}
+
+// Populate Period select
+function _cmpFillPeriod(side){
+  const sel=document.getElementById('cmp'+side+'Period');if(!sel)return;
+  const cur=CMP[side].period||APP.period;
+  sel.innerHTML='';
+  Object.keys(APP.monthly).forEach(k=>{
+    const o=document.createElement('option');o.value=k;o.textContent=k;sel.appendChild(o);
+  });
+  if([...sel.options].some(o=>o.value===cur)){sel.value=cur;CMP[side].period=cur;}
+  else if(sel.options.length){sel.value=sel.options[0].value;CMP[side].period=sel.value;}
+}
+// Populate Week select for the current period
+function _cmpFillWeek(side){
+  const sel=document.getElementById('cmp'+side+'Week');if(!sel)return;
+  const pd=APP.monthly[CMP[side].period];if(!pd){sel.innerHTML='';return;}
+  const cur=CMP[side].week;
+  sel.innerHTML='<option value="_period">⊞ Period Summary</option>';
+  (pd.weeks||[]).forEach(w=>{
+    const sd=pd.all&&pd.all[w]?pd.all[w].sd:'';
+    const o=document.createElement('option');o.value=w;o.textContent=w.replace('Week ','Wk ')+(sd?' ('+sd+')':'');sel.appendChild(o);
+  });
+  if([...sel.options].some(o=>o.value===cur)){sel.value=cur;}
+  else{sel.value=sel.options[0].value;CMP[side].week=sel.value;}
+}
+// Populate Location select
+function _cmpFillLoc(side){
+  const sel=document.getElementById('cmp'+side+'Loc');if(!sel)return;
+  const cur=CMP[side].loc;
+  sel.innerHTML='<option value="AllStores">All Stores</option>';
+  if(APP.districts.length){
+    const og=document.createElement('optgroup');og.label='── Districts ──';
+    APP.districts.forEach(d=>{const o=document.createElement('option');o.value=d.id;o.textContent='📍 '+d.name;og.appendChild(o);});
+    sel.appendChild(og);
+  }
+  const og2=document.createElement('optgroup');og2.label='── Individual Stores ──';
+  const pd=APP.monthly[CMP[side].period];
+  SS.forEach(s=>{if(pd&&pd.stores&&pd.stores[s]){const o=document.createElement('option');o.value=s;o.textContent=SN[s]||s;og2.appendChild(o);}});
+  sel.appendChild(og2);
+  if([...sel.options].some(o=>o.value===cur))sel.value=cur;
+  else{sel.value='AllStores';CMP[side].loc='AllStores';}
+}
+
+// Build the metric checkbox grid (called once on init)
+function _cmpBuildMetricsBox(){
+  const box=document.getElementById('cmpMetricsBox');if(!box)return;
+  const grouped={};
+  EXPORT_METRICS.forEach(m=>{(grouped[m.cat]=grouped[m.cat]||[]).push(m);});
+  const sel=new Set(CMP.metrics||[]);
+  box.innerHTML=Object.entries(grouped).map(([cat,list])=>`
+    <div class="cmp-metric-group">
+      <div class="cmp-metric-group-hdr">${cat}
+        <span class="cmp-metric-group-toggle" onclick="cmpGroupToggle('${cat}')">toggle</span>
+      </div>
+      ${list.map(m=>`<label class="cmp-metric-item"><input type="checkbox" data-k="${m.k}" ${sel.has(m.k)?'checked':''} onchange="cmpMetricChange()">${m.label}</label>`).join('')}
+    </div>`).join('');
+  _cmpUpdateMetricCount();
+}
+function _cmpUpdateMetricCount(){
+  const el=document.getElementById('cmpMetricCount');if(!el)return;
+  el.textContent=' — '+(CMP.metrics||[]).length+' selected';
+}
+function cmpMetricChange(){
+  const box=document.getElementById('cmpMetricsBox');if(!box)return;
+  CMP.metrics=[...box.querySelectorAll('input[type=checkbox]:checked')].map(cb=>cb.dataset.k);
+  _cmpSaveMetrics();_cmpUpdateMetricCount();updCompare();
+}
+function cmpGroupToggle(cat){
+  const box=document.getElementById('cmpMetricsBox');
+  const boxes=[...box.querySelectorAll('.cmp-metric-group')].find(g=>g.querySelector('.cmp-metric-group-hdr').textContent.trim().startsWith(cat));
+  if(!boxes)return;
+  const cbs=boxes.querySelectorAll('input[type=checkbox]');
+  const anyUnchecked=[...cbs].some(c=>!c.checked);
+  cbs.forEach(c=>{c.checked=anyUnchecked;});
+  cmpMetricChange();
+}
+function cmpSelectAll(on){
+  const box=document.getElementById('cmpMetricsBox');if(!box)return;
+  box.querySelectorAll('input[type=checkbox]').forEach(cb=>{cb.checked=!!on;});
+  cmpMetricChange();
+}
+function cmpSwap(){
+  const a={...CMP.A},b={...CMP.B};CMP.A=b;CMP.B=a;
+  initCompare();updCompare();
+}
+function cmpOnChange(side,field){
+  const sel=document.getElementById('cmp'+side+({period:'Period',week:'Week',loc:'Loc'}[field]));
+  if(!sel)return;
+  CMP[side][field]=sel.value;
+  if(field==='period'){
+    // Reset week to Period Summary when period changes; refill week + loc lists
+    CMP[side].week='_period';
+    _cmpFillWeek(side);_cmpFillLoc(side);
+  }
+  updCompare();
+}
+
+// Initialize compare panel (call when dashboard first shows or data changes)
+function initCompare(){
+  if(!Object.keys(APP.monthly).length)return;
+  // Defaults: A = current view (current period + current week + current loc), B = same period but Week 1 (or prev week)
+  if(!CMP.A.period)CMP.A.period=APP.period;
+  if(!CMP.A.week)CMP.A.week=APP.week||'_period';
+  if(!CMP.A.loc)CMP.A.loc=APP.loc||'AllStores';
+  if(!CMP.B.period)CMP.B.period=APP.period;
+  if(!CMP.B.week){
+    const pd=APP.monthly[CMP.B.period];
+    const wks=pd&&pd.weeks||[];
+    const idx=wks.indexOf(APP.week||'');
+    CMP.B.week=idx>0?wks[idx-1]:(wks[0]||'_period');
+  }
+  if(!CMP.B.loc)CMP.B.loc=APP.loc||'AllStores';
+  if(!CMP.metrics)CMP.metrics=_cmpLoadMetrics();
+  ['A','B'].forEach(side=>{_cmpFillPeriod(side);_cmpFillWeek(side);_cmpFillLoc(side);});
+  _cmpBuildMetricsBox();
+  CMP._initialized=true;
+}
+
+// Format a value for display according to the metric's fmt spec
+function _cmpFmt(v,fmt){
+  if(v==null||isNaN(v))return '-';
+  const sign=v<0?'-':'';
+  const a=Math.abs(v);
+  if(fmt==='$')return sign+$F(a).replace(/^-/,'');
+  if(fmt==='$±')return(v>=0?'+':'-')+$F(a).replace(/^-/,'');
+  if(fmt==='%')return(v*100).toFixed(2)+'%';
+  if(fmt==='%±')return(v>=0?'+':'')+(v*100).toFixed(1)+'%';
+  if(fmt==='$1')return sign+'$'+a.toFixed(1);
+  if(fmt==='0')return v===0?'0':Math.round(v).toLocaleString();
+  if(fmt==='0±')return(v>=0?'+':'-')+Math.round(a).toLocaleString();
+  if(fmt==='dec')return sign+a.toFixed(2);
+  if(fmt==='time')return tF(v);
+  return String(v);
+}
+// Format the A-B delta per the metric fmt — always include ± sign
+function _cmpFmtDelta(v,fmt){
+  if(v==null||isNaN(v))return '-';
+  if(v===0)return '0';
+  const sgn=v>=0?'+':'-';
+  const a=Math.abs(v);
+  if(fmt==='$'||fmt==='$±'){return sgn+'$'+(a>=1000?Math.round(a).toLocaleString():a.toFixed(0));}
+  if(fmt==='%'||fmt==='%±'){return sgn+(a*100).toFixed(2)+'pp';}
+  if(fmt==='$1')return sgn+'$'+a.toFixed(1);
+  if(fmt==='0'||fmt==='0±')return sgn+Math.round(a).toLocaleString();
+  if(fmt==='dec')return sgn+a.toFixed(2);
+  if(fmt==='time')return sgn+Math.round(a)+'s';
+  return(v>=0?'+':'')+String(v);
+}
+// Special value calculators for computed metrics (_sV, _sVP, _hV, _acc)
+function _cmpCompute(d,wk,mk){
+  if(!d)return 0;
+  const _v=x=>(x==null||isNaN(x))?0:x;
+  const dy='all'; // for compare, always use full-week/period value
+  if(mk==='_sV'){const a=_v(gv(d,wk,'acS',dy)),p=_v(gv(d,wk,'pjS',dy));return p>0?a-p:0;}
+  if(mk==='_sVP'){const a=_v(gv(d,wk,'acS',dy)),p=_v(gv(d,wk,'pjS',dy));return p>0?(a-p)/p:0;}
+  if(mk==='_hV'){return _v(gv(d,wk,'acH',dy))-_v(gv(d,wk,'scH',dy));}
+  if(mk==='_acc'){const c=_v(gv(d,wk,'comp',dy)),t=_v(gv(d,wk,'txns',dy));return t>0?c/t*1000:0;}
+  return _v(gv(d,wk,mk,dy));
+}
+// Display label for location code
+function _cmpLocLabel(locKey){
+  if(locKey==='AllStores')return 'All Stores';
+  const di=APP.districts.find(d=>d.id===locKey);
+  if(di)return di.name;
+  return(SN[locKey]||locKey)+(STNUM[locKey]?' ('+STNUM[locKey]+')':'');
+}
+function _cmpWeekLabel(wk){return wk==='_period'?'Period Summary':wk;}
+
+// Render the comparison table
+function updCompare(){
+  const tbl=document.getElementById('cmpTbl');if(!tbl)return;
+  if(!CMP._initialized&&Object.keys(APP.monthly).length){initCompare();}
+  if(!CMP.metrics||!CMP.metrics.length){tbl.innerHTML='<thead><tr><th>Select at least one metric above to compare</th></tr></thead>';return;}
+  const dA=cmpGetData(CMP.A.period,CMP.A.loc);
+  const dB=cmpGetData(CMP.B.period,CMP.B.loc);
+  const aHdr=`A: ${_cmpLocLabel(CMP.A.loc)} — ${CMP.A.period||''} ${_cmpWeekLabel(CMP.A.week||'')}`;
+  const bHdr=`B: ${_cmpLocLabel(CMP.B.loc)} — ${CMP.B.period||''} ${_cmpWeekLabel(CMP.B.week||'')}`;
+  let html=`<thead><tr><th>Metric</th><th class="cmp-num" style="background:#c04020">${aHdr}</th><th class="cmp-num">${bHdr}</th><th class="cmp-num">Δ (A−B)</th><th class="cmp-num">Δ %</th></tr></thead><tbody>`;
+  const selMetrics=CMP.metrics.map(k=>EXPORT_METRICS.find(m=>m.k===k)).filter(Boolean);
+  selMetrics.forEach(m=>{
+    const vA=dA?_cmpCompute(dA,CMP.A.week,m.k):null;
+    const vB=dB?_cmpCompute(dB,CMP.B.week,m.k):null;
+    const hasA=vA!=null&&!isNaN(vA);
+    const hasB=vB!=null&&!isNaN(vB);
+    const delta=(hasA&&hasB)?(vA-vB):null;
+    const pctDelta=(hasA&&hasB&&vB!==0)?(delta/Math.abs(vB))*100:null;
+    // Direction: for most metrics, positive delta means A>B. For labor %, SOS times, accuracy — lower is better.
+    const lowerBetter=['aLP','pLP','alLP','plLP','_acc','win','winL','winD','kio','kioL','kioD','comp','wgV'].includes(m.k);
+    const dCls=delta==null||delta===0?'cmp-delta-neu':((delta>0)===lowerBetter?'cmp-delta-neg':'cmp-delta-pos');
+    const dStr=delta==null?'-':_cmpFmtDelta(delta,m.fmt);
+    const pctStr=pctDelta==null?'-':(pctDelta>=0?'+':'')+pctDelta.toFixed(1)+'%';
+    html+=`<tr>
+      <td><span class="cmp-metric-cat">${m.cat}</span><span class="cmp-metric-label">${m.label}</span></td>
+      <td class="cmp-num">${hasA?_cmpFmt(vA,m.fmt):'-'}</td>
+      <td class="cmp-num">${hasB?_cmpFmt(vB,m.fmt):'-'}</td>
+      <td class="cmp-num ${dCls}">${dStr}</td>
+      <td class="cmp-num ${dCls}">${pctStr}</td>
+    </tr>`;
+  });
+  html+='</tbody>';
+  tbl.innerHTML=html;
+}
+
 function update(){
   // Guard: make sure APP.week is valid for the current period.
   // Stale week keys (e.g. leftover from a previous period) cause stores to
@@ -2098,6 +2388,8 @@ function update(){
   if(dyC){dyC.style.opacity=isPeriod?'0.3':'1';dyC.style.pointerEvents=isPeriod?'none':'';}
   const d=getLData(),wk=APP.week,dy=isPeriod?'all':resDy(APP.day);
   updKPI(d,wk,dy);updSales(d,wk,dy);updLabor(d,wk,dy);updSOS(d,wk,dy);updCOGS(d,wk,dy);updRanks(wk);updOpsHub(wk,dy);
+  // Refresh compare panel selectors when data changes
+  if(typeof updCompare==='function')updCompare();
   // refresh open config panels
   if(document.getElementById('cfg-dist').classList.contains('on'))updDist(wk);
   if(document.getElementById('cfg-settings').classList.contains('on'))renderCfgSettings();
