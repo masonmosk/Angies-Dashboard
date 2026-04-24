@@ -741,7 +741,7 @@ const SS=['Baseline','Signal','QC','Ray','Pinnacle','Central','LoneCactus','Tbir
 // Maps alternate Excel tab names → SS store keys (when Angie renames a tab in the workbook)
 const SHEET_ALIAS={'Rural':'Ray','Power':'PowerRay'};
 // Bump this whenever parseWB changes structure so old caches are automatically re-parsed
-const PARSE_VER=18;
+const PARSE_VER=19;
 const TBL_DATA={};
 const EXPORT_METRICS=[
   // Sales
@@ -795,6 +795,115 @@ const SN={Baseline:'Baseline & Hardy',Signal:'Signal Butte & Guadalupe',QC:'Gilb
 const STNUM={Baseline:11101,Signal:11103,QC:11108,Ray:11126,Pinnacle:11104,Central:11125,LoneCactus:11122,Tbird:11102,Litchfield:11106,'83rd':11105,Peoria:11131,Jackrabbit:11112,Wilmot1:11201,Alvernon:11205,Wilmot2:11204,Marketplace:11206,Copper:11202,Milton:11301,BlueDiamond:12101,Prescott:11302,Alma:15101,PowerRay:11134};
 // Render store name with number badge for tables
 function stNm(sk){const num=STNUM[sk];const nm=SN[sk]||sk;return(num?`<span style="color:var(--gtxt);font-size:10px;font-weight:600;margin-right:5px">${num}</span>`:'')+(nm==='Power & Ray'?`${nm} <span style="background:var(--gold);color:var(--navy);font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;margin-left:2px">NEW</span>`:nm);}
+
+// ══════════════════════════════════════════════════════════════════════════
+// AUTO-DISCOVERY: new stores added to the Excel workbook are detected
+// automatically (no code edit required). SS/SN/STNUM/SHEET_ALIAS mutate at
+// parse time and persist to localStorage so they survive page reloads.
+// ══════════════════════════════════════════════════════════════════════════
+const STORE_META_KEY='angies_store_meta';
+const _ORIGINAL_SS=new Set(['Baseline','Signal','QC','Ray','Pinnacle','Central','LoneCactus','Tbird','Litchfield','83rd','Peoria','Jackrabbit','Wilmot1','Alvernon','Wilmot2','Marketplace','Copper','Milton','BlueDiamond','Prescott','Alma','PowerRay']);
+// Sheet tab names that are NEVER stores (workbook utility sheets)
+const _RESERVED_SHEETS=new Set(['allstores','bonus','window','kiosk','donations','actuallabor','hme','toastgroupsales','toastaccounting','zendesk','projections','toastkiosk','scheduledlabor','mc','qb25','qb26','oracle','store list','labormodel','accuracy','compstores','instructions','avt$','sheet1','sheet2','1','2','donations (2)','comp stores']);
+
+function _saveStoreMeta(){
+  try{
+    const meta={stores:[]};
+    SS.forEach(k=>{
+      if(_ORIGINAL_SS.has(k))return;
+      const alias=Object.entries(SHEET_ALIAS).find(([_,v])=>v===k);
+      meta.stores.push({key:k,name:SN[k]||k,num:STNUM[k]||0,sheetAlias:alias?alias[0]:k});
+    });
+    localStorage.setItem(STORE_META_KEY,JSON.stringify(meta));
+  }catch(e){}
+}
+// Load previously-discovered stores from localStorage on app init
+(function _loadStoreMeta(){
+  try{
+    const s=localStorage.getItem(STORE_META_KEY);if(!s)return;
+    const meta=JSON.parse(s);if(!meta||!Array.isArray(meta.stores))return;
+    meta.stores.forEach(st=>{
+      if(!st.key||SS.includes(st.key))return;
+      SS.push(st.key);
+      SN[st.key]=st.name||st.key;
+      if(st.num)STNUM[st.key]=st.num;
+      if(st.sheetAlias&&st.sheetAlias!==st.key&&!SHEET_ALIAS[st.sheetAlias])SHEET_ALIAS[st.sheetAlias]=st.key;
+    });
+  }catch(e){}
+})();
+
+// Find the best matching sheet tab for a store name
+function _findSheetForStore(name,sheetNames){
+  const nameL=name.toLowerCase().trim();
+  const words=nameL.replace(/[&#]/g,' ').split(/\s+/).filter(w=>w.length>1);
+  // 1. Exact sheet name match
+  for(const sn of sheetNames){if(sn.toLowerCase()===nameL&&!_RESERVED_SHEETS.has(sn.toLowerCase()))return sn;}
+  // 2. First significant word of store name == sheet name (handles "Grant & Elliot" → "Grant")
+  if(words.length&&words[0].length>=3){
+    for(const sn of sheetNames){const snL=sn.toLowerCase();if(_RESERVED_SHEETS.has(snL))continue;if(snL===words[0])return sn;}
+  }
+  // 3. Sheet name appears as a whole word within store name
+  for(const sn of sheetNames){const snL=sn.toLowerCase();if(_RESERVED_SHEETS.has(snL)||snL.length<3)continue;if(words.includes(snL))return sn;}
+  // 4. Sheet name starts with store's first word (e.g. store "Grant & Elliot" → sheet "GrantElliot")
+  if(words.length&&words[0].length>=4){
+    for(const sn of sheetNames){const snL=sn.toLowerCase();if(_RESERVED_SHEETS.has(snL))continue;if(snL.startsWith(words[0])&&snL.length<=20)return sn;}
+  }
+  return null;
+}
+// Generate a stable internal key for a newly-discovered store
+function _makeStoreKey(name,sheetName){
+  // Prefer the sheet tab name if it's a safe identifier (typical convention)
+  if(/^[A-Za-z][A-Za-z0-9_]{1,23}$/.test(sheetName)&&!SS.includes(sheetName))return sheetName;
+  // Derive from first alphanumeric word of the display name
+  const first=(name.replace(/[^A-Za-z0-9 ]/g,' ').split(/\s+/).filter(Boolean)[0]||'Store').slice(0,20);
+  let k=first,i=2;while(SS.includes(k))k=first+i++;
+  return k;
+}
+// Auto-discover new stores from the Store List sheet. Mutates SS/SN/STNUM/SHEET_ALIAS.
+// Returns [{key, num, name, sheetName}] for the newly-added stores this call.
+function _discoverNewStores(wb){
+  const ws=wb.Sheets['Store List'];
+  if(!ws||!ws['!ref'])return[];
+  const rng=XLSX.utils.decode_range(ws['!ref']);
+  const existingNums=new Set(Object.values(STNUM).filter(v=>v));
+  const existingSnLower=new Set(Object.values(SN).map(v=>String(v).toLowerCase().trim()));
+  const existingAliasSheets=new Set(Object.keys(SHEET_ALIAS));
+  const discovered=[];
+  for(let r=0;r<=Math.min(rng.e.r,200);r++){
+    const numCell=ws[XLSX.utils.encode_cell({r,c:0})];
+    if(!numCell||numCell.t!=='n')continue;
+    const num=Math.round(numCell.v);
+    if(num<1000||num>999999)continue;
+    if(existingNums.has(num))continue;
+    const nmCell=ws[XLSX.utils.encode_cell({r,c:1})];
+    if(!nmCell||!nmCell.v)continue;
+    const name=String(nmCell.v).trim();
+    if(name.length<3)continue;
+    if(/\b(truck|trailer|food\s*truck)\b/i.test(name))continue;
+    if(existingSnLower.has(name.toLowerCase()))continue;
+    const sheetName=_findSheetForStore(name,wb.SheetNames);
+    if(!sheetName)continue;
+    if(existingAliasSheets.has(sheetName))continue;
+    if(SS.includes(sheetName)&&SN[sheetName])continue; // already a store key
+    const key=_makeStoreKey(name,sheetName);
+    if(SS.includes(key))continue;
+    SS.push(key);
+    SN[key]=name;
+    STNUM[key]=num;
+    if(sheetName!==key)SHEET_ALIAS[sheetName]=key;
+    existingNums.add(num);existingSnLower.add(name.toLowerCase());existingAliasSheets.add(sheetName);
+    discovered.push({key,num,name,sheetName});
+  }
+  if(discovered.length){
+    _saveStoreMeta();
+    console.info('[Parse] Discovered new store(s):',discovered.map(s=>`${s.name} (#${s.num}) → key "${s.key}" from sheet "${s.sheetName}"`).join('; '));
+    if(typeof showToast==='function'){
+      const list=discovered.map(s=>`${s.name} (#${s.num})`).join(', ');
+      showToast(`🏪 New store${discovered.length>1?'s':''} detected: <strong>${list}</strong>`,5000);
+    }
+  }
+  return discovered;
+}
 
 // ── SIGN-IN GATE ──────────────────────────────────────────────────────────────
 const SIGNIN_KEY='angies_auth_email';
@@ -1409,6 +1518,10 @@ function parseWB(wb,filenameHint){
   }
   res.all=parseSheet(wb,'AllStores');
   res.weeks=Object.keys(res.all).sort((a,b)=>+a.split(' ')[1] - +b.split(' ')[1]);
+  // Auto-discover any new stores from the Store List sheet (mutates SS/SN/STNUM/SHEET_ALIAS)
+  // Must run BEFORE parseStoreList and the SS.forEach iteration so new stores get parsed.
+  const _newStores=_discoverNewStores(wb);
+  if(_newStores.length)res.newStores=_newStores;
   // Parse store numbers from Store List sheet (source of truth for new stores)
   res.storeNums=parseStoreList(wb);
   // Build reverse alias map: storeKey → alternate sheet name
