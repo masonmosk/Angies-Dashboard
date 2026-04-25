@@ -741,7 +741,7 @@ const SS=['Baseline','Signal','QC','Ray','Pinnacle','Central','LoneCactus','Tbir
 // Maps alternate Excel tab names → SS store keys (when Angie renames a tab in the workbook)
 const SHEET_ALIAS={'Rural':'Ray','Power':'PowerRay'};
 // Bump this whenever parseWB changes structure so old caches are automatically re-parsed
-const PARSE_VER=19;
+const PARSE_VER=20;
 const TBL_DATA={};
 const EXPORT_METRICS=[
   // Sales
@@ -774,9 +774,11 @@ const EXPORT_METRICS=[
   {k:'wgV',  label:'Wage % Variance',         cat:'Labor',    fmt:'%'},
   // Speed of Service
   {k:'win',  label:'Window Time (All)',        cat:'SOS',      fmt:'time'},
+  {k:'winB', label:'Window Time Breakfast',     cat:'SOS',      fmt:'time'},
   {k:'winL', label:'Window Time Lunch',        cat:'SOS',      fmt:'time'},
   {k:'winD', label:'Window Time Dinner',       cat:'SOS',      fmt:'time'},
   {k:'kio',  label:'Kiosk Time (All)',         cat:'SOS',      fmt:'time'},
+  {k:'kioB', label:'Kiosk Time Breakfast',      cat:'SOS',      fmt:'time'},
   {k:'kioL', label:'Kiosk Time Lunch',         cat:'SOS',      fmt:'time'},
   {k:'kioD', label:'Kiosk Time Dinner',        cat:'SOS',      fmt:'time'},
   {k:'cars', label:'Total Cars',               cat:'SOS',      fmt:'0'},
@@ -1537,10 +1539,11 @@ function parseWB(wb,filenameHint){
     'PowerRay:',res.stores['PowerRay']?Object.keys(res.stores['PowerRay']).length+' weeks':'MISSING');
 
   // Override SOS metrics from dedicated Window / Kiosk sheet tabs
-  function _applySOS(sheetName,metL,metD){
+  function _applySOS(sheetName,metL,metD,metB){
     const sos=parseSOS_Tab(wb,sheetName,res.all,yr);
     if(!sos)return;
     const{hasStores,map}=sos;
+    const mKeys=metB?[metL,metD,metB]:[metL,metD];
     if(hasStores){
       // Clear SOS metrics from ALL individual store sheets first — they often contain
       // company averages, not store-specific data.  The dedicated SOS tab is the source of truth.
@@ -1548,8 +1551,7 @@ function parseWB(wb,filenameHint){
         if(!res.stores[s])return;
         Object.keys(res.stores[s]).forEach(wk=>{
           if(res.stores[s][wk]&&res.stores[s][wk].m){
-            delete res.stores[s][wk].m[metL];
-            delete res.stores[s][wk].m[metD];
+            mKeys.forEach(mk=>{delete res.stores[s][wk].m[mk];});
           }
         });
       });
@@ -1560,11 +1562,12 @@ function parseWB(wb,filenameHint){
           if(!res.stores[store][wk])res.stores[store][wk]={sd:'',m:{}};
           if(vals.l>0)res.stores[store][wk].m[metL]={d:vals.dl,w:vals.l};
           if(vals.d>0)res.stores[store][wk].m[metD]={d:vals.dd,w:vals.d};
+          if(metB&&vals.b>0)res.stores[store][wk].m[metB]={d:vals.db,w:vals.b};
         });
       });
       // Recalculate AllStores SOS from individual store data
       res.weeks.forEach(wk=>{
-        [metL,metD].forEach(mk=>{
+        mKeys.forEach(mk=>{
           const vals=SS.filter(s=>res.stores[s]&&res.stores[s][wk]&&res.stores[s][wk].m&&res.stores[s][wk].m[mk]).map(s=>res.stores[s][wk].m[mk]);
           if(!vals.length)return;
           const daily=new Array(7).fill(0);let wSum=0;
@@ -1580,11 +1583,12 @@ function parseWB(wb,filenameHint){
         if(!res.all[wk])return;
         if(vals.l>0)res.all[wk].m[metL]={d:vals.dl,w:vals.l};
         if(vals.d>0)res.all[wk].m[metD]={d:vals.dd,w:vals.d};
+        if(metB&&vals.b>0)res.all[wk].m[metB]={d:vals.db,w:vals.b};
       });
     }
   }
-  if(wb.SheetNames.includes('Window'))_applySOS('Window','winL','winD');
-  if(wb.SheetNames.includes('Kiosk'))_applySOS('Kiosk','kioL','kioD');
+  if(wb.SheetNames.includes('Window'))_applySOS('Window','winL','winD','winB');
+  if(wb.SheetNames.includes('Kiosk'))_applySOS('Kiosk','kioL','kioD','kioB');
 
   // Attach metadata for confirmation banner
   res.storeCount=Object.keys(res.stores).length;
@@ -1632,14 +1636,14 @@ function parseSheet(wb,name){
     'Needed To Cut/Add  (-/+)':'needH','Needed To Cut/Add (-/+)':'needH',
     'Needed to Cut/Add  (-/+)':'needH','Needed to Cut/Add (-/+)':'needH',
     'Window Time':'win','HME Time':'hme','Total Cars':'cars','Kiosk Fulfillment Time':'kio',
-    'Window Time Lunch':'winL','Window Time Dinner':'winD',
-    'Kiosk Fulfillment Time Lunch':'kioL','Kiosk Fulfillment Time Dinner':'kioD',
-    'Lunch Window Time':'winL','Dinner Window Time':'winD',
-    'Lunch Kiosk Time':'kioL','Dinner Kiosk Time':'kioD',
+    'Window Time Lunch':'winL','Window Time Dinner':'winD','Window Time Breakfast':'winB',
+    'Kiosk Fulfillment Time Lunch':'kioL','Kiosk Fulfillment Time Dinner':'kioD','Kiosk Fulfillment Time Breakfast':'kioB',
+    'Lunch Window Time':'winL','Dinner Window Time':'winD','Breakfast Window Time':'winB',
+    'Lunch Kiosk Time':'kioL','Dinner Kiosk Time':'kioD','Breakfast Kiosk Time':'kioB',
     'Accuracy Complaints':'comp','Transactions':'txns','WTD Accuracy/1000':'acc1k',
     'Lobster':'cgL','Chicken':'cgC','Steak':'cgS','Cheeses':'cgCh','Cheese':'cgCh',
     'Lobster Variance':'cgL','Chicken Variance':'cgC','Steak Variance':'cgS','Cheeses Variance':'cgCh','Cheese Variance':'cgCh'};
-  const TM=new Set(['win','hme','kio','winL','winD','kioL','kioD']);
+  const TM=new Set(['win','hme','kio','winL','winD','winB','kioL','kioD','kioB']);
   const CM=new Set(['cgL','cgC','cgS','cgCh']);
   // Normalized MM map for fuzzy label matching (fallback when exact match fails)
   function _normLbl(s){return s.toLowerCase().replace(/\s+/g,' ').replace(/\bhrs\b/g,'hours').replace(/\bsched\b/g,'scheduled').replace(/\bact\b/g,'actual').replace(/\bproj\b/g,'projected').replace(/\bexcl\b\.?/g,'excl.').replace(/\bincl\b\.?/g,'incl.').replace(/\bvar\b/g,'variance').trim();}
@@ -1928,22 +1932,24 @@ function parseSOS_Tab(wb, sheetName, resAll, yr){
       const lc=ws[XLSX.utils.encode_cell({r,c:lc_col})];
       if(lc&&lc.v!=null){
         const v=String(lc.v).trim();
-        if(/\b(lunch|dinner)\b/i.test(v)){lbl=v;break;}
+        if(/\b(breakfast|lunch|dinner)\b/i.test(v)){lbl=v;break;}
       }
     }
     if(!lbl)continue;
     // Skip combined "Total-Lunch/dinner" rows — they match both lunch and dinner regex
     // but are a blended average, not a peak measurement; including them corrupts both metrics
-    if(/total[-\s/]*(lunch|dinner)/i.test(lbl))continue;
+    if(/total[-\s/]*(lunch|dinner|breakfast)/i.test(lbl))continue;
+    const isB=/\bbreakfast\b/i.test(lbl);
     const isL=/\blunch\b/i.test(lbl);
     const isD=/\bdinner\b/i.test(lbl);
-    if(!isL&&!isD)continue;
+    if(!isB&&!isL&&!isD)continue;
 
     // Read each date-mapped column
     for(const[cStr,{wk,dow}]of Object.entries(colMap)){
       const v=getCV(ws,r,parseInt(cStr),true);
       if(v<=0)continue;
-      if(!acc[cStore][wk])acc[cStore][wk]={lByDow:new Array(7).fill(0),dByDow:new Array(7).fill(0),lVals:[],dVals:[]};
+      if(!acc[cStore][wk])acc[cStore][wk]={lByDow:new Array(7).fill(0),dByDow:new Array(7).fill(0),bByDow:new Array(7).fill(0),lVals:[],dVals:[],bVals:[]};
+      if(isB){acc[cStore][wk].bByDow[dow]=v;acc[cStore][wk].bVals.push(v);dbg.valuesFound++;}
       if(isL){acc[cStore][wk].lByDow[dow]=v;acc[cStore][wk].lVals.push(v);dbg.valuesFound++;}
       if(isD){acc[cStore][wk].dByDow[dow]=v;acc[cStore][wk].dVals.push(v);dbg.valuesFound++;}
     }
@@ -1959,10 +1965,11 @@ function parseSOS_Tab(wb, sheetName, resAll, yr){
   for(const[store,wkData]of Object.entries(acc)){
     map[store]={};
     for(const[wk,d]of Object.entries(wkData)){
-      const lNZ=d.lVals.filter(v=>v>0),dNZ=d.dVals.filter(v=>v>0);
+      const lNZ=d.lVals.filter(v=>v>0),dNZ=d.dVals.filter(v=>v>0),bNZ=(d.bVals||[]).filter(v=>v>0);
       const l=lNZ.length?lNZ.reduce((a,b)=>a+b)/lNZ.length:0;
       const dv=dNZ.length?dNZ.reduce((a,b)=>a+b)/dNZ.length:0;
-      if(l>0||dv>0)map[store][wk]={l,d:dv,dl:d.lByDow,dd:d.dByDow};
+      const b=bNZ.length?bNZ.reduce((a,b)=>a+b)/bNZ.length:0;
+      if(l>0||dv>0||b>0)map[store][wk]={l,d:dv,b,dl:d.lByDow,dd:d.dByDow,db:d.bByDow||new Array(7).fill(0)};
     }
   }
 
@@ -2039,7 +2046,7 @@ function aggStores(pd,keys){
   const first=pd.stores[valid[0]];
   // Use RATE_MK for averaging — all other metrics (hours, counts, $) are summed
   // RATE_MK may not be defined yet at parse time so fall back to a safe set
-  const AVG=typeof RATE_MK!=='undefined'?RATE_MK:new Set(['pLP','aLP','plLP','alLP','pSP','aSP','nsoLP','regLP','wgV','win','hme','kio','winL','winD','kioL','kioD']);
+  const AVG=typeof RATE_MK!=='undefined'?RATE_MK:new Set(['pLP','aLP','plLP','alLP','pSP','aSP','nsoLP','regLP','wgV','win','hme','kio','winL','winD','winB','kioL','kioD','kioB']);
   Object.keys(first).forEach(wk=>{
     res[wk]={sd:first[wk].sd,m:{}};
     const allM=new Set();valid.forEach(s=>{if(pd.stores[s][wk])Object.keys(pd.stores[s][wk].m).forEach(m=>allM.add(m))});
@@ -2053,7 +2060,7 @@ function aggStores(pd,keys){
 }
 
 // Metrics that should be averaged (not summed) across days
-const RATE_MK=new Set(['pLP','aLP','plLP','alLP','pSP','aSP','nsoLP','regLP','wgV','win','hme','kio','winL','winD','kioL','kioD']);
+const RATE_MK=new Set(['pLP','aLP','plLP','alLP','pSP','aSP','nsoLP','regLP','wgV','win','hme','kio','winL','winD','winB','kioL','kioD','kioB']);
 
 // For labor PLANNING: use aggStores across all individual stores for AllStores view.
 // This correctly SUMS count metrics (scH, acH, idH, needH, nsoH, regH…) and
@@ -2461,7 +2468,7 @@ function updCompare(){
     const delta=(hasA&&hasB)?(vA-vB):null;
     const pctDelta=(hasA&&hasB&&vB!==0)?(delta/Math.abs(vB))*100:null;
     // Direction: for most metrics, positive delta means A>B. For labor %, SOS times, accuracy — lower is better.
-    const lowerBetter=['aLP','pLP','alLP','plLP','_acc','win','winL','winD','kio','kioL','kioD','comp','wgV'].includes(m.k);
+    const lowerBetter=['aLP','pLP','alLP','plLP','_acc','win','winL','winD','winB','kio','kioL','kioD','kioB','comp','wgV'].includes(m.k);
     const dCls=delta==null||delta===0?'cmp-delta-neu':((delta>0)===lowerBetter?'cmp-delta-neg':'cmp-delta-pos');
     const dStr=delta==null?'-':_cmpFmtDelta(delta,m.fmt);
     const pctStr=pctDelta==null?'-':(pctDelta>=0?'+':'')+pctDelta.toFixed(1)+'%';
@@ -2817,7 +2824,7 @@ function setSosLd(el,metric){
   renderSOSSub(d,wk,win,kio,winL,winD,kioL,kioD,hasWL,hasWD,hasKL,hasKD);
 }
 // SOS GOAL CHECK
-const SOS_GOALS={winL:80,winD:100,kioL:420,kioD:360};// DT Lunch<1:20, DT Dinner<1:40, Kiosk Other<7:00, Kiosk CT/DC<6:00
+const SOS_GOALS={winB:80,winL:80,winD:100,kioB:360,kioL:420,kioD:360};// DT Breakfast<1:20, DT Lunch<1:20, DT Dinner<1:40, Kiosk Breakfast<6:00, Kiosk Other<7:00, Kiosk CT/DC<6:00
 function bldGoalCheck(wk){
   const pd=getPD(),rows=[];
   SS.forEach(s=>{
@@ -3309,8 +3316,10 @@ function updOpsHub(wk,dy){
     const labP=gv(d,wk,'pLP',dy);
     const splh=gv(d,wk,'aSP',dy);
     const cars=gv(d,wk,'cars',dy);
+    const winB=gv(d,wk,'winB',dy);
     const winL=gv(d,wk,'winL',dy);
     const winD=gv(d,wk,'winD',dy);
+    const kioB=gv(d,wk,'kioB',dy);
     const kioL=gv(d,wk,'kioL',dy);
     const kioD=gv(d,wk,'kioD',dy);
     const txns=gv(d,wk,'txns',dy);
@@ -3321,15 +3330,17 @@ function updOpsHub(wk,dy){
     const cgCh=gv(d,wk,'cgCh',dy);
     const acc1k=txns?comp/txns*1000:0;
     const labVar=labP>0?labA-labP:null;
-    return{sales,salesVar,hrsV,labA,labP,labVar,splh,cars,winL,winD,kioL,kioD,txns,comp,acc1k,cgL,cgC,cgS,cgCh};
+    return{sales,salesVar,hrsV,labA,labP,labVar,splh,cars,winB,winL,winD,kioB,kioL,kioD,txns,comp,acc1k,cgL,cgC,cgS,cgCh};
   }
 
   // classifiers — strict green/red matching screenshot key
   function cH(v){return(v||v===0)&&v!==0?(v<0?'oh-g':'oh-r'):'';}        // hrs var: under=green, over=red
   function cL(v){return v>0?(v*100<=APP.goals.labor?'oh-g':'oh-r'):'';}  // labor %: ≤24%=green
   function cLV(v){return v!==null&&v!==undefined&&v!==0?(v<0?'oh-g':'oh-r'):'';} // labor var: <0=green, >0=red, =0 neutral
+  function cDTB(v){return v>0?(v<=SOS_GOALS.winB?'oh-g':'oh-r'):'';}     // DT Breakfast: <1:20=green
   function cDTL(v){return v>0?(v<=SOS_GOALS.winL?'oh-g':'oh-r'):'';}     // DT Lunch: <1:20=green
   function cDTD(v){return v>0?(v<=SOS_GOALS.winD?'oh-g':'oh-r'):'';}     // DT Dinner: <1:40=green
+  function cKB(v){return v>0?(v<=SOS_GOALS.kioB?'oh-g':'oh-r'):'';}      // Kiosk Breakfast: <6:00=green
   function cKL(v){return v>0?(v<=SOS_GOALS.kioL?'oh-g':'oh-r'):'';}      // Kiosk Other: <7:00=green
   function cKD(v){return v>0?(v<=SOS_GOALS.kioD?'oh-g':'oh-r'):'';}      // Kiosk CT/DC: <6:00=green
   function cAcc(v){return v>=0?(v<=APP.goals.acc?'oh-g':'oh-r'):'';}     // accuracy: <1.0=green
@@ -3348,7 +3359,7 @@ function updOpsHub(wk,dy){
   function fCG(v){if(!v)return'-';return $FCG(Math.round(v));}
   function fSOS(v){return v>0?tF(v):'-';}
 
-  const NC=21; // total columns (1 name + 3 sales + 4 labor + 6 speed + 3 acc + 4 cogs)
+  const NC=23; // total columns (1 name + 3 sales + 4 labor + 8 speed + 3 acc + 4 cogs)
 
   // row(label, metrics, rowCls, isStore, locKey)
   // locKey: store key ('Pinnacle'), district id ('d_123'), 'AllStores', or null (no click)
@@ -3378,8 +3389,10 @@ function updOpsHub(wk,dy){
       <td ${ct('labor')}>${fSP(m.splh)}</td>
       <td ${ct('sos')}>${fC(m.cars)}</td>
       <td ${ct('sos')}>${fPof(m.cars,totCars)}</td>
+      <td ${ct('sos',cDTB(m.winB))}>${fSOS(m.winB)}</td>
       <td ${ct('sos',cDTL(m.winL))}>${fSOS(m.winL)}</td>
       <td ${ct('sos',cDTD(m.winD))}>${fSOS(m.winD)}</td>
+      <td ${ct('sos',cKB(m.kioB))}>${fSOS(m.kioB)}</td>
       <td ${ct('sos',cKL(m.kioL))}>${fSOS(m.kioL)}</td>
       <td ${ct('sos',cKD(m.kioD))}>${fSOS(m.kioD)}</td>
       <td ${ct('acc')}>${fT(m.txns)}</td>
@@ -3400,14 +3413,14 @@ function updOpsHub(wk,dy){
       <th class="oh-ttl" rowspan="2">${dyLbl}</th>
       <th colspan="3" class="oh-sec" style="background:#c04020!important">Sales</th>
       <th colspan="4" class="oh-sec oh-sec-lab">Labor</th>
-      <th colspan="6" class="oh-sec oh-sec-spd">Speed</th>
+      <th colspan="8" class="oh-sec oh-sec-spd">Speed</th>
       <th colspan="3" class="oh-sec oh-sec-acc">Accuracy</th>
       <th colspan="4" class="oh-sec oh-sec-cg">Food Cost</th>
     </tr>
     <tr>
       <th class="oh-col">Sales $</th><th class="oh-col">% Mix</th><th class="oh-col">Sales Var $</th>
       <th class="oh-col">Hrs Var</th><th class="oh-col">Labor %</th><th class="oh-col">Labor Var</th><th class="oh-col">SPLH</th>
-      <th class="oh-col">Cars</th><th class="oh-col">%</th><th class="oh-col">DT Lunch</th><th class="oh-col">DT Dinner</th><th class="oh-col">Kiosk Lnch</th><th class="oh-col">Kiosk Dnnr</th>
+      <th class="oh-col">Cars</th><th class="oh-col">%</th><th class="oh-col">DT Bkfst</th><th class="oh-col">DT Lunch</th><th class="oh-col">DT Dinner</th><th class="oh-col">Kiosk Bkfst</th><th class="oh-col">Kiosk Lnch</th><th class="oh-col">Kiosk Dnnr</th>
       <th class="oh-col">Trans</th><th class="oh-col">%</th><th class="oh-col">Per 1,000</th>
       <th class="oh-col">Lobster</th><th class="oh-col">Chicken</th><th class="oh-col">Steak</th><th class="oh-col">Cheese</th>
     </tr>
