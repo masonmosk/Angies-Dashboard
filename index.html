@@ -2745,7 +2745,13 @@ function updSOS(d,wk,dy){
   });
   if(!showTabs.find(t=>t.id===APP.sosSub))APP.sosSub=showTabs[0].id;
   renderSOSSub(d,wk,win,kio,winL,winD,kioL,kioD,hasWL,hasWD,hasKL,hasKD);
-  drw('cCA','bar',cLabels(wk),[{label:'Total Cars',data:cars,backgroundColor:'rgba(212,168,67,.7)',borderRadius:4}],'');
+  // Total Cars — line chart with inline value labels (no hover required)
+  dstry('cCA');const cCA=document.getElementById('cCA');
+  if(cCA){
+    const optsCA=cOpts('',true);
+    optsCA.layout={padding:{top:24}};
+    CH['cCA']=new Chart(cCA,{type:'line',data:{labels:cLabels(wk),datasets:[{label:'Total Cars',data:cars,borderColor:'#D4A843',backgroundColor:'rgba(212,168,67,.18)',pointBackgroundColor:'#D4A843',pointBorderColor:'#fff',pointBorderWidth:2,pointRadius:5,pointHoverRadius:7,borderWidth:2.5,fill:true,tension:.3}]},options:optsCA,plugins:[_valueLabelsPlugin(v=>nF(v))]});
+  }
   bldGoalCheck(wk);
 }
 function renderSOSSub(d,wk,win,kio,winL,winD,kioL,kioD,hasWL,hasWD,hasKL,hasKD){
@@ -2772,17 +2778,25 @@ function renderSOSSub(d,wk,win,kio,winL,winD,kioL,kioD,hasWL,hasWD,hasKL,hasKD){
     let data=win,goalSec=null,goalLbl='';
     if(ld==='lunch'&&hasWL){data=winL;goalSec=SOS_GOALS.winL;goalLbl='Goal (1:20)';}
     else if(ld==='dinner'&&hasWD){data=winD;goalSec=SOS_GOALS.winD;goalLbl='Goal (1:40)';}
-    const winDS=[{label:'Window Time',data,backgroundColor:data.map(v=>v>0&&goalSec&&v>goalSec?'rgba(232,67,42,.85)':'rgba(232,67,42,.5)'),borderRadius:4,order:2}];
-    if(goalSec){winDS.push({label:goalLbl,data:new Array(data.length).fill(goalSec),type:'line',borderColor:'#1B2A4A',borderDash:[6,4],borderWidth:2,pointRadius:0,fill:false,order:1});}
-    dstry('cWN');const cWN=document.getElementById('cWN');if(cWN)CH['cWN']=new Chart(cWN,{type:'bar',data:{labels:cLabels(APP.week),datasets:winDS},options:cOpts('s',false)});
+    const winDS=[{label:'Window Time',data,borderColor:'#E8432A',backgroundColor:'rgba(232,67,42,.12)',pointBackgroundColor:data.map(v=>v>0&&goalSec&&v>goalSec?'#E8432A':'#E8432A'),pointBorderColor:'#fff',pointBorderWidth:2,pointRadius:5,pointHoverRadius:7,borderWidth:2.5,fill:true,tension:.3,order:2}];
+    if(goalSec){winDS.push({label:goalLbl,data:new Array(data.length).fill(goalSec),borderColor:'#1B2A4A',borderDash:[6,4],borderWidth:2,pointRadius:0,fill:false,order:1});}
+    dstry('cWN');const cWN=document.getElementById('cWN');if(cWN){
+      const opts=cOpts('s',true);
+      opts.layout={padding:{top:24}};
+      CH['cWN']=new Chart(cWN,{type:'line',data:{labels:cLabels(APP.week),datasets:winDS},options:opts,plugins:[_valueLabelsPlugin(v=>tF(v))]});
+    }
   } else {
     const ld=APP.sosLd.kio;
     let data=kio,goalSec=null,goalLbl='';
     if(ld==='lunch'&&hasKL){data=kioL;goalSec=SOS_GOALS.kioL;goalLbl='Goal (6:00)';}
     else if(ld==='dinner'&&hasKD){data=kioD;goalSec=SOS_GOALS.kioD;goalLbl='Goal (6:00)';}
-    const kioDS=[{label:'Kiosk Time',data,backgroundColor:data.map(v=>v>0&&goalSec&&v>goalSec?'rgba(27,42,74,.9)':'rgba(27,42,74,.5)'),borderRadius:4,order:2}];
-    if(goalSec){kioDS.push({label:goalLbl,data:new Array(data.length).fill(goalSec),type:'line',borderColor:'#D4A843',borderDash:[6,4],borderWidth:2,pointRadius:0,fill:false,order:1});}
-    dstry('cKO');const cKO=document.getElementById('cKO');if(cKO)CH['cKO']=new Chart(cKO,{type:'bar',data:{labels:cLabels(APP.week),datasets:kioDS},options:cOpts('s',false)});
+    const kioDS=[{label:'Kiosk Time',data,borderColor:'#1B2A4A',backgroundColor:'rgba(27,42,74,.12)',pointBackgroundColor:'#1B2A4A',pointBorderColor:'#fff',pointBorderWidth:2,pointRadius:5,pointHoverRadius:7,borderWidth:2.5,fill:true,tension:.3,order:2}];
+    if(goalSec){kioDS.push({label:goalLbl,data:new Array(data.length).fill(goalSec),borderColor:'#D4A843',borderDash:[6,4],borderWidth:2,pointRadius:0,fill:false,order:1});}
+    dstry('cKO');const cKO=document.getElementById('cKO');if(cKO){
+      const opts=cOpts('s',true);
+      opts.layout={padding:{top:24}};
+      CH['cKO']=new Chart(cKO,{type:'line',data:{labels:cLabels(APP.week),datasets:kioDS},options:opts,plugins:[_valueLabelsPlugin(v=>tF(v))]});
+    }
   }
 }
 function _renderSOSDebug(show){
@@ -4002,6 +4016,41 @@ function tblSortClick(id,col){
 
 // CHARTS
 function drw(id,type,labels,datasets,px){dstry(id);CH[id]=new Chart(document.getElementById(id),{type,data:{labels,datasets},options:cOpts(px,type==='line')})}
+// Chart.js plugin: draw value labels above each line-chart point so users
+// don't need to hover. Skips dashed (goal) datasets and zero/null values.
+function _valueLabelsPlugin(formatter){
+  return{
+    id:'valueLabels',
+    afterDatasetsDraw(chart){
+      const ctx=chart.ctx;
+      ctx.save();
+      ctx.font='600 11px Inter,system-ui,sans-serif';
+      ctx.textAlign='center';
+      ctx.textBaseline='middle';
+      chart.data.datasets.forEach((ds,dsi)=>{
+        if(ds.borderDash)return; // skip goal/threshold lines
+        if(ds.type&&ds.type!=='line'&&chart.config.type!=='line')return;
+        const meta=chart.getDatasetMeta(dsi);
+        if(!meta||!meta.data)return;
+        meta.data.forEach((pt,i)=>{
+          const v=ds.data[i];
+          if(v==null||v===0)return;
+          const text=formatter?formatter(v):String(v);
+          const w=ctx.measureText(text).width;
+          // White rounded pill background so the label is legible against gridlines
+          ctx.fillStyle='rgba(255,255,255,0.92)';
+          const px=pt.x,py=pt.y-15;
+          const padX=4,padY=2,h=14;
+          if(ctx.roundRect){ctx.beginPath();ctx.roundRect(px-w/2-padX,py-h/2-padY,w+padX*2,h+padY*2,4);ctx.fill();}
+          else{ctx.fillRect(px-w/2-padX,py-h/2-padY,w+padX*2,h+padY*2);}
+          ctx.fillStyle=ds.borderColor||ds.backgroundColor||'#1B2A4A';
+          ctx.fillText(text,px,py);
+        });
+      });
+      ctx.restore();
+    }
+  };
+}
 function cOpts(px,smooth){
   return{responsive:true,maintainAspectRatio:false,
     plugins:{legend:{position:'top',labels:{font:{size:11},boxWidth:12,padding:10}},tooltip:{callbacks:{label:c=>{const v=c.raw;if(px==='$')return c.dataset.label+': '+$F(v);if(px==='%')return c.dataset.label+': '+v.toFixed(1)+'%';if(px==='s')return c.dataset.label+': '+tF(v)+' ('+Math.round(v)+'s)';return c.dataset.label+': '+nF(v)}}}},
