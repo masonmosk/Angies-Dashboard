@@ -618,6 +618,8 @@ input[type=file]{display:none}
       <div class="sos-sub on" id="sos-win">
         <div class="ld-sub-tabs">
           <div class="ld-tab on" data-ld="all" data-metric="win" onclick="setSosLd(this,'win')">All Day</div>
+          <div class="ld-tab" data-ld="dayparts" data-metric="win" onclick="setSosLd(this,'win')">B+L+D</div>
+          <div class="ld-tab" data-ld="breakfast" data-metric="win" onclick="setSosLd(this,'win')">Breakfast</div>
           <div class="ld-tab" data-ld="lunch" data-metric="win" onclick="setSosLd(this,'win')">Lunch</div>
           <div class="ld-tab" data-ld="dinner" data-metric="win" onclick="setSosLd(this,'win')">Dinner</div>
         </div>
@@ -629,6 +631,8 @@ input[type=file]{display:none}
       <div class="sos-sub" id="sos-kio">
         <div class="ld-sub-tabs">
           <div class="ld-tab on" data-ld="all" data-metric="kio" onclick="setSosLd(this,'kio')">All Day</div>
+          <div class="ld-tab" data-ld="dayparts" data-metric="kio" onclick="setSosLd(this,'kio')">B+L+D</div>
+          <div class="ld-tab" data-ld="breakfast" data-metric="kio" onclick="setSosLd(this,'kio')">Breakfast</div>
           <div class="ld-tab" data-ld="lunch" data-metric="kio" onclick="setSosLd(this,'kio')">Lunch</div>
           <div class="ld-tab" data-ld="dinner" data-metric="kio" onclick="setSosLd(this,'kio')">Dinner</div>
         </div>
@@ -2674,10 +2678,10 @@ function renderLaborTab(d,wk,dy){
 // SPEED OF SERVICE
 function updSOS(d,wk,dy){
   const win=gda(d,wk,'win'),kio=gda(d,wk,'kio'),hme=gda(d,wk,'hme'),cars=gda(d,wk,'cars');
-  const winL=gda(d,wk,'winL'),winD=gda(d,wk,'winD'),kioL=gda(d,wk,'kioL'),kioD=gda(d,wk,'kioD');
+  const winL=gda(d,wk,'winL'),winD=gda(d,wk,'winD'),winB=gda(d,wk,'winB'),kioL=gda(d,wk,'kioL'),kioD=gda(d,wk,'kioD'),kioB=gda(d,wk,'kioB');
   const hasW=win.some(v=>v>0),hasK=kio.some(v=>v>0),hasH=hme.some(v=>v>0);
-  const hasWL=winL.some(v=>v>0),hasWD=winD.some(v=>v>0);
-  const hasKL=kioL.some(v=>v>0),hasKD=kioD.some(v=>v>0);
+  const hasWL=winL.some(v=>v>0),hasWD=winD.some(v=>v>0),hasWB=winB.some(v=>v>0);
+  const hasKL=kioL.some(v=>v>0),hasKD=kioD.some(v=>v>0),hasKB=kioB.some(v=>v>0);
   // info banner
   let info=[];
   if(hasW||hasH)info.push('Window: drive-through timer data'+(hasH?' (HME)':''));
@@ -2740,11 +2744,11 @@ function updSOS(d,wk,dy){
   showTabs.forEach(t=>{
     const btn=document.createElement('button');btn.className='sos-tab'+(APP.sosSub===t.id?' on':'');
     btn.textContent=t.label;
-    btn.onclick=()=>{APP.sosSub=t.id;renderSOSSub(d,wk,win,kio,winL,winD,kioL,kioD,hasWL,hasWD,hasKL,hasKD)};
+    btn.onclick=()=>{APP.sosSub=t.id;renderSOSSub(d,wk,win,kio,winL,winD,winB,kioL,kioD,kioB,hasWL,hasWD,hasWB,hasKL,hasKD,hasKB)};
     tb.appendChild(btn);
   });
   if(!showTabs.find(t=>t.id===APP.sosSub))APP.sosSub=showTabs[0].id;
-  renderSOSSub(d,wk,win,kio,winL,winD,kioL,kioD,hasWL,hasWD,hasKL,hasKD);
+  renderSOSSub(d,wk,win,kio,winL,winD,winB,kioL,kioD,kioB,hasWL,hasWD,hasWB,hasKL,hasKD,hasKB);
   // Total Cars — line chart with inline value labels (no hover required)
   dstry('cCA');const cCA=document.getElementById('cCA');
   if(cCA){
@@ -2754,7 +2758,7 @@ function updSOS(d,wk,dy){
   }
   bldGoalCheck(wk);
 }
-function renderSOSSub(d,wk,win,kio,winL,winD,kioL,kioD,hasWL,hasWD,hasKL,hasKD){
+function renderSOSSub(d,wk,win,kio,winL,winD,winB,kioL,kioD,kioB,hasWL,hasWD,hasWB,hasKL,hasKD,hasKB){
   document.querySelectorAll('#sosTabBar .sos-tab').forEach(b=>b.classList.toggle('on',
     APP.sosSub==='win'?b.textContent.includes('Window'):
     APP.sosSub==='kio'?b.textContent.includes('Kiosk'):
@@ -2762,40 +2766,79 @@ function renderSOSSub(d,wk,win,kio,winL,winD,kioL,kioD,hasWL,hasWD,hasKL,hasKD){
   document.getElementById('sos-win').classList.toggle('on',APP.sosSub==='win');
   document.getElementById('sos-kio').classList.toggle('on',APP.sosSub==='kio');
   document.getElementById('sos-goals').classList.toggle('on',APP.sosSub==='goals');
-  // show/hide lunch/dinner tabs based on data availability
-  const ldWin=document.querySelectorAll('#sos-win .ld-tab');
-  ldWin.forEach(t=>{
+  // show/hide breakfast / lunch / dinner / B+L+D tabs based on data availability
+  document.querySelectorAll('#sos-win .ld-tab').forEach(t=>{
+    if(t.dataset.ld==='breakfast')t.style.display=hasWB?'':'none';
     if(t.dataset.ld==='lunch')t.style.display=hasWL?'':'none';
     if(t.dataset.ld==='dinner')t.style.display=hasWD?'':'none';
+    if(t.dataset.ld==='dayparts')t.style.display=((hasWB?1:0)+(hasWL?1:0)+(hasWD?1:0))>=2?'':'none';
   });
-  const ldKio=document.querySelectorAll('#sos-kio .ld-tab');
-  ldKio.forEach(t=>{
+  document.querySelectorAll('#sos-kio .ld-tab').forEach(t=>{
+    if(t.dataset.ld==='breakfast')t.style.display=hasKB?'':'none';
     if(t.dataset.ld==='lunch')t.style.display=hasKL?'':'none';
     if(t.dataset.ld==='dinner')t.style.display=hasKD?'':'none';
+    if(t.dataset.ld==='dayparts')t.style.display=((hasKB?1:0)+(hasKL?1:0)+(hasKD?1:0))>=2?'':'none';
   });
+  // If current tab is hidden, fall back to "all"
+  const winLd=APP.sosLd.win;
+  if((winLd==='breakfast'&&!hasWB)||(winLd==='lunch'&&!hasWL)||(winLd==='dinner'&&!hasWD))APP.sosLd.win='all';
+  const kioLd=APP.sosLd.kio;
+  if((kioLd==='breakfast'&&!hasKB)||(kioLd==='lunch'&&!hasKL)||(kioLd==='dinner'&&!hasKD))APP.sosLd.kio='all';
+  // Sync `on` class with current ld
+  ['win','kio'].forEach(metric=>{
+    document.querySelectorAll('#sos-'+metric+' .ld-tab').forEach(t=>t.classList.toggle('on',t.dataset.ld===APP.sosLd[metric]));
+  });
+
+  // Color palette for the daypart overlay view
+  const COLOR_B='#D4A843', COLOR_L='#E8432A', COLOR_D='#1B2A4A';
+  function _line(label,data,color,fill){
+    const bgRGBA=color==='#D4A843'?'rgba(212,168,67,.12)':color==='#E8432A'?'rgba(232,67,42,.12)':'rgba(27,42,74,.12)';
+    return{label,data,borderColor:color,backgroundColor:bgRGBA,pointBackgroundColor:color,pointBorderColor:'#fff',pointBorderWidth:2,pointRadius:5,pointHoverRadius:7,borderWidth:2.5,fill:!!fill,tension:.3,order:2};
+  }
+  function _goalLine(lbl,data,color){return{label:lbl,data,borderColor:color,borderDash:[6,4],borderWidth:2,pointRadius:0,fill:false,order:1};}
+
   if(APP.sosSub==='win'){
     const ld=APP.sosLd.win;
-    let data=win,goalSec=null,goalLbl='';
-    if(ld==='lunch'&&hasWL){data=winL;goalSec=SOS_GOALS.winL;goalLbl='Goal (1:20)';}
-    else if(ld==='dinner'&&hasWD){data=winD;goalSec=SOS_GOALS.winD;goalLbl='Goal (1:40)';}
-    const winDS=[{label:'Window Time',data,borderColor:'#E8432A',backgroundColor:'rgba(232,67,42,.12)',pointBackgroundColor:data.map(v=>v>0&&goalSec&&v>goalSec?'#E8432A':'#E8432A'),pointBorderColor:'#fff',pointBorderWidth:2,pointRadius:5,pointHoverRadius:7,borderWidth:2.5,fill:true,tension:.3,order:2}];
-    if(goalSec){winDS.push({label:goalLbl,data:new Array(data.length).fill(goalSec),borderColor:'#1B2A4A',borderDash:[6,4],borderWidth:2,pointRadius:0,fill:false,order:1});}
+    const datasets=[];
+    if(ld==='dayparts'){
+      if(hasWB)datasets.push(_line('Breakfast',winB,COLOR_B,false));
+      if(hasWL)datasets.push(_line('Lunch',winL,COLOR_L,false));
+      if(hasWD)datasets.push(_line('Dinner',winD,COLOR_D,false));
+    } else {
+      let data=win,goalSec=null,goalLbl='',color=COLOR_L;
+      if(ld==='breakfast'&&hasWB){data=winB;goalSec=SOS_GOALS.winB;goalLbl='Goal (1:20)';color=COLOR_B;}
+      else if(ld==='lunch'&&hasWL){data=winL;goalSec=SOS_GOALS.winL;goalLbl='Goal (1:20)';color=COLOR_L;}
+      else if(ld==='dinner'&&hasWD){data=winD;goalSec=SOS_GOALS.winD;goalLbl='Goal (1:40)';color=COLOR_D;}
+      datasets.push(_line('Window Time',data,color,true));
+      if(goalSec)datasets.push(_goalLine(goalLbl,new Array(data.length).fill(goalSec),'#1B2A4A'));
+    }
     dstry('cWN');const cWN=document.getElementById('cWN');if(cWN){
-      const opts=cOpts('s',true);
-      opts.layout={padding:{top:24}};
-      CH['cWN']=new Chart(cWN,{type:'line',data:{labels:cLabels(APP.week),datasets:winDS},options:opts,plugins:[_valueLabelsPlugin(v=>tF(v))]});
+      const opts=cOpts('s',true);opts.layout={padding:{top:ld==='dayparts'?40:24}};
+      // For daypart overlay: legend on bottom (top would crowd the labels). For solo: hide legend.
+      if(ld==='dayparts'){opts.plugins.legend.position='bottom';}
+      else{opts.plugins.legend.display=false;}
+      CH['cWN']=new Chart(cWN,{type:'line',data:{labels:cLabels(APP.week),datasets},options:opts,plugins:[_valueLabelsPlugin(v=>tF(v))]});
     }
   } else {
     const ld=APP.sosLd.kio;
-    let data=kio,goalSec=null,goalLbl='';
-    if(ld==='lunch'&&hasKL){data=kioL;goalSec=SOS_GOALS.kioL;goalLbl='Goal (6:00)';}
-    else if(ld==='dinner'&&hasKD){data=kioD;goalSec=SOS_GOALS.kioD;goalLbl='Goal (6:00)';}
-    const kioDS=[{label:'Kiosk Time',data,borderColor:'#1B2A4A',backgroundColor:'rgba(27,42,74,.12)',pointBackgroundColor:'#1B2A4A',pointBorderColor:'#fff',pointBorderWidth:2,pointRadius:5,pointHoverRadius:7,borderWidth:2.5,fill:true,tension:.3,order:2}];
-    if(goalSec){kioDS.push({label:goalLbl,data:new Array(data.length).fill(goalSec),borderColor:'#D4A843',borderDash:[6,4],borderWidth:2,pointRadius:0,fill:false,order:1});}
+    const datasets=[];
+    if(ld==='dayparts'){
+      if(hasKB)datasets.push(_line('Breakfast',kioB,COLOR_B,false));
+      if(hasKL)datasets.push(_line('Lunch',kioL,COLOR_L,false));
+      if(hasKD)datasets.push(_line('Dinner',kioD,COLOR_D,false));
+    } else {
+      let data=kio,goalSec=null,goalLbl='',color=COLOR_D;
+      if(ld==='breakfast'&&hasKB){data=kioB;goalSec=SOS_GOALS.kioB;goalLbl='Goal (6:00)';color=COLOR_B;}
+      else if(ld==='lunch'&&hasKL){data=kioL;goalSec=SOS_GOALS.kioL;goalLbl='Goal (6:00)';color=COLOR_L;}
+      else if(ld==='dinner'&&hasKD){data=kioD;goalSec=SOS_GOALS.kioD;goalLbl='Goal (6:00)';color=COLOR_D;}
+      datasets.push(_line('Kiosk Time',data,color,true));
+      if(goalSec)datasets.push(_goalLine(goalLbl,new Array(data.length).fill(goalSec),'#D4A843'));
+    }
     dstry('cKO');const cKO=document.getElementById('cKO');if(cKO){
-      const opts=cOpts('s',true);
-      opts.layout={padding:{top:24}};
-      CH['cKO']=new Chart(cKO,{type:'line',data:{labels:cLabels(APP.week),datasets:kioDS},options:opts,plugins:[_valueLabelsPlugin(v=>tF(v))]});
+      const opts=cOpts('s',true);opts.layout={padding:{top:ld==='dayparts'?40:24}};
+      if(ld==='dayparts'){opts.plugins.legend.position='bottom';}
+      else{opts.plugins.legend.display=false;}
+      CH['cKO']=new Chart(cKO,{type:'line',data:{labels:cLabels(APP.week),datasets},options:opts,plugins:[_valueLabelsPlugin(v=>tF(v))]});
     }
   }
 }
@@ -2833,9 +2876,12 @@ function setSosLd(el,metric){
   const parent=el.closest('.ld-sub-tabs');
   parent.querySelectorAll('.ld-tab').forEach(t=>t.classList.toggle('on',t===el));
   const d=getLData(),wk=APP.week,dy=resDy(APP.day);
-  const win=gda(d,wk,'win'),kio=gda(d,wk,'kio'),winL=gda(d,wk,'winL'),winD=gda(d,wk,'winD'),kioL=gda(d,wk,'kioL'),kioD=gda(d,wk,'kioD');
-  const hasWL=winL.some(v=>v>0),hasWD=winD.some(v=>v>0),hasKL=kioL.some(v=>v>0),hasKD=kioD.some(v=>v>0);
-  renderSOSSub(d,wk,win,kio,winL,winD,kioL,kioD,hasWL,hasWD,hasKL,hasKD);
+  const win=gda(d,wk,'win'),kio=gda(d,wk,'kio');
+  const winL=gda(d,wk,'winL'),winD=gda(d,wk,'winD'),winB=gda(d,wk,'winB');
+  const kioL=gda(d,wk,'kioL'),kioD=gda(d,wk,'kioD'),kioB=gda(d,wk,'kioB');
+  const hasWL=winL.some(v=>v>0),hasWD=winD.some(v=>v>0),hasWB=winB.some(v=>v>0);
+  const hasKL=kioL.some(v=>v>0),hasKD=kioD.some(v=>v>0),hasKB=kioB.some(v=>v>0);
+  renderSOSSub(d,wk,win,kio,winL,winD,winB,kioL,kioD,kioB,hasWL,hasWD,hasWB,hasKL,hasKD,hasKB);
 }
 // SOS GOAL CHECK
 const SOS_GOALS={winB:80,winL:80,winD:100,kioB:360,kioL:420,kioD:360};// DT Breakfast<1:20, DT Lunch<1:20, DT Dinner<1:40, Kiosk Breakfast<6:00, Kiosk Other<7:00, Kiosk CT/DC<6:00
