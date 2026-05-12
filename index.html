@@ -771,8 +771,9 @@ const EXPORT_METRICS=[
   {k:'idH',  label:'Ideal Hours',             cat:'Labor',    fmt:'0'},
   {k:'lmH',  label:'Model Hours',             cat:'Labor',    fmt:'0'},
   {k:'needH',label:'Cut/Add Hours',           cat:'Labor',    fmt:'0±'},
-  {k:'nsoH', label:'NSO Training Hours',      cat:'Labor',    fmt:'0'},
-  {k:'regH', label:'Regular Training Hours',  cat:'Labor',    fmt:'0'},
+  {k:'scTrH',label:'Training Hours Scheduled',cat:'Labor',    fmt:'dec'},
+  {k:'acTrH',label:'Training Hours Actual',   cat:'Labor',    fmt:'dec'},
+  {k:'_trHV',label:'Training Hours Variance', cat:'Labor',    fmt:'dec±'},
   {k:'nsoLP',label:'NSO Training %',          cat:'Labor',    fmt:'%'},
   {k:'regLP',label:'Regular Training %',      cat:'Labor',    fmt:'%'},
   {k:'wgV',  label:'Wage % Variance',         cat:'Labor',    fmt:'%'},
@@ -2497,6 +2498,7 @@ function _cmpCompute(d,wk,mk){
   if(mk==='_sV'){const a=_v(gv(d,wk,'acS',dy)),p=_v(gv(d,wk,'pjS',dy));return p>0?a-p:0;}
   if(mk==='_sVP'){const a=_v(gv(d,wk,'acS',dy)),p=_v(gv(d,wk,'pjS',dy));return p>0?(a-p)/p:0;}
   if(mk==='_hV'){return _v(gv(d,wk,'acH',dy))-_v(gv(d,wk,'scH',dy));}
+  if(mk==='_trHV'){const sc=_v(gv(d,wk,'scTrH',dy)),ac=_v(gv(d,wk,'acTrH',dy));return(ac||sc)?ac-sc:0;}
   if(mk==='_acc'){const c=_v(gv(d,wk,'comp',dy)),t=_v(gv(d,wk,'txns',dy));return t>0?c/t*1000:0;}
   return _v(gv(d,wk,mk,dy));
 }
@@ -2726,7 +2728,10 @@ function renderLaborTab(d,wk,dy){
       const el=document.getElementById('lb-sec2');if(el&&!el.querySelector('.ib'))el.insertAdjacentHTML('afterbegin','<div class="ib" style="margin-bottom:14px"><span>ℹ️</span><span>NSO/Regular training rows not found — ensure your Excel has "NSO Training Hours" and "Regular Training Hours" rows.</span></div>');
     }
     document.getElementById('lborTblTitle').textContent='Training by Store';
-    bldTbl('tL',wk,dy,[{l:'Store',k:'name'},{l:'Tr Sched',k:'scTrH',f:'dec'},{l:'Tr Actual',k:'_acTrH',f:'dec'},{l:'Tr Var',k:'_trHV',f:'dec±'},{l:'NSO Hrs',k:'nsoH',f:'0'},{l:'Reg Hrs',k:'regH',f:'0'},{l:'Total Tr Hrs',k:'_totTrH',f:'0'},{l:'NSO Wages',k:'nsoW',f:'$'},{l:'Reg Wages',k:'regW',f:'$'},{l:'Total Wages',k:'_totTrW',f:'$'},{l:'NSO Tr%',k:'nsoLP',f:'%'},{l:'Reg Tr%',k:'regLP',f:'%'}]);
+    // Excel doesn't track NSO vs Regular HOURS separately (only the labor %).
+    // Show the combined training hours (Sched/Actual/Variance) which DO have data,
+    // and keep the NSO/Reg percentages which also have data.
+    bldTbl('tL',wk,dy,[{l:'Store',k:'name'},{l:'Tr Sched',k:'scTrH',f:'dec'},{l:'Tr Actual',k:'_acTrH',f:'dec'},{l:'Tr Var',k:'_trHV',f:'dec±'},{l:'NSO Tr%',k:'nsoLP',f:'%'},{l:'Reg Tr%',k:'regLP',f:'%'}]);
     bldTblFilter('tL');
   }
 }
