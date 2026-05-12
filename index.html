@@ -2108,13 +2108,39 @@ function aggStores(pd,keys){
   // Use RATE_MK for averaging — all other metrics (hours, counts, $) are summed
   // RATE_MK may not be defined yet at parse time so fall back to a safe set
   const AVG=typeof RATE_MK!=='undefined'?RATE_MK:new Set(['pLP','aLP','plLP','alLP','pSP','aSP','nsoLP','regLP','wgV','win','hme','kio','winL','winD','winB','kioL','kioD','kioB']);
+  // Detect whether the caller asked for ALL stores in the period (= true AllStores
+  // aggregation, not a district subset). For full-AllStores rollups we should
+  // trust the parsed AllStores sheet whenever it has data, because individual
+  // store sheets sometimes lag (e.g., Period 5 has Actual Hours in AllStores
+  // but empty in most store tabs). Districts still aggregate from stores.
+  const allStoreKeys=Object.keys(pd.stores||{});
+  const _isFullAll=allStoreKeys.length&&valid.length===allStoreKeys.length&&allStoreKeys.every(k=>valid.includes(k));
   Object.keys(first).forEach(wk=>{
     res[wk]={sd:first[wk].sd,m:{}};
     const allM=new Set();valid.forEach(s=>{if(pd.stores[s][wk])Object.keys(pd.stores[s][wk].m).forEach(m=>allM.add(m))});
+    // Also include any metrics that exist on pd.all but no individual store —
+    // ensures we don't drop AllStores-only metrics like accuracy aggregates.
+    if(pd.all&&pd.all[wk]&&pd.all[wk].m)Object.keys(pd.all[wk].m).forEach(m=>allM.add(m));
     allM.forEach(mk=>{
       const d=[0,0,0,0,0,0,0];let ws=0,cnt=0;
       valid.forEach(s=>{const sd=pd.stores[s][wk];if(!sd||!sd.m[mk])return;const mv=sd.m[mk];for(let i=0;i<7;i++)d[i]+=(mv.d[i]||0);ws+=(mv.w||0);cnt++});
-      res[wk].m[mk]={d:AVG.has(mk)&&cnt?d.map(v=>v/cnt):d,w:AVG.has(mk)&&cnt?ws/cnt:ws};
+      let wFinal=AVG.has(mk)&&cnt?ws/cnt:ws;
+      let dFinal=AVG.has(mk)&&cnt?d.map(v=>v/cnt):d;
+      // Fallback to AllStores when per-store aggregation is empty/much smaller
+      // than what the consolidated AllStores sheet has. This handles cases
+      // where individual store tabs lag behind AllStores for current-week data.
+      const allW=pd.all&&pd.all[wk]&&pd.all[wk].m&&pd.all[wk].m[mk]?pd.all[wk].m[mk].w:0;
+      const allD=pd.all&&pd.all[wk]&&pd.all[wk].m&&pd.all[wk].m[mk]?(pd.all[wk].m[mk].d||null):null;
+      if(_isFullAll&&allW){
+        // For RATE metrics: prefer AllStores' value (already a correct average)
+        // For SUM metrics: only swap when per-store sum is materially smaller
+        // (less than 50% of AllStores) — protects against partial data.
+        if(AVG.has(mk)||wFinal===0||wFinal<allW*0.5){
+          wFinal=allW;
+          if(allD)dFinal=allD.slice();
+        }
+      }
+      res[wk].m[mk]={d:dFinal,w:wFinal};
     });
   });
   return res;
