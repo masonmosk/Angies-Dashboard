@@ -745,7 +745,7 @@ const SS=['Baseline','Signal','QC','Ray','Pinnacle','Central','LoneCactus','Tbir
 // Maps alternate Excel tab names → SS store keys (when Angie renames a tab in the workbook)
 const SHEET_ALIAS={'Rural':'Ray','Power':'PowerRay'};
 // Bump this whenever parseWB changes structure so old caches are automatically re-parsed
-const PARSE_VER=20;
+const PARSE_VER=21;
 const TBL_DATA={};
 const EXPORT_METRICS=[
   // Sales
@@ -867,30 +867,70 @@ function _makeStoreKey(name,sheetName){
 }
 // Auto-discover new stores from the Store List sheet. Mutates SS/SN/STNUM/SHEET_ALIAS.
 // Returns [{key, num, name, sheetName}] for the newly-added stores this call.
+// Detect which column in the Store List holds the numeric store numbers.
+// Old schema (Period 4): col A = number, col B = display name.
+// New schema (Period 5+): col A = sheet tab name (text), col B = number,
+//                          col C = display name (e.g. "Valencia & Midvale").
+// Returns { numCol, sheetTabCol, nameCol } — sheetTabCol is null for old schema.
+function _detectStoreListSchema(ws,rng){
+  const counts=[0,0];
+  for(let r=0;r<=Math.min(rng.e.r,20);r++){
+    for(const c of [0,1]){
+      const cell=ws[XLSX.utils.encode_cell({r,c})];
+      if(cell&&cell.t==='n'&&cell.v>=1000&&cell.v<=999999)counts[c]++;
+    }
+  }
+  // Prefer the column with the most valid store numbers in the scanned range
+  if(counts[1]>counts[0])return{numCol:1,sheetTabCol:0,nameCol:2};
+  if(counts[0]>0)return{numCol:0,sheetTabCol:null,nameCol:1};
+  return null;
+}
+
 function _discoverNewStores(wb){
   const ws=wb.Sheets['Store List'];
   if(!ws||!ws['!ref'])return[];
   const rng=XLSX.utils.decode_range(ws['!ref']);
+  const schema=_detectStoreListSchema(ws,rng);
+  if(!schema){console.warn('[Parse] Store List schema unrecognized — no numeric store-number column found');return[];}
   const existingNums=new Set(Object.values(STNUM).filter(v=>v));
   const existingSnLower=new Set(Object.values(SN).map(v=>String(v).toLowerCase().trim()));
   const existingAliasSheets=new Set(Object.keys(SHEET_ALIAS));
   const discovered=[];
   for(let r=0;r<=Math.min(rng.e.r,200);r++){
-    const numCell=ws[XLSX.utils.encode_cell({r,c:0})];
+    const numCell=ws[XLSX.utils.encode_cell({r,c:schema.numCol})];
     if(!numCell||numCell.t!=='n')continue;
     const num=Math.round(numCell.v);
     if(num<1000||num>999999)continue;
     if(existingNums.has(num))continue;
-    const nmCell=ws[XLSX.utils.encode_cell({r,c:1})];
-    if(!nmCell||!nmCell.v)continue;
-    const name=String(nmCell.v).trim();
-    if(name.length<3)continue;
+    // Try the schema's name column first, then fall back to other columns
+    let name='';
+    for(const tryCol of [schema.nameCol,schema.numCol===0?1:2,3,4]){
+      if(tryCol==null||tryCol===schema.numCol||tryCol===schema.sheetTabCol)continue;
+      const c=ws[XLSX.utils.encode_cell({r,c:tryCol})];
+      if(c&&c.v!=null){
+        const s=String(c.v).trim();
+        if(s.length>=3&&!/^\d+$/.test(s)){name=s;break;}
+      }
+    }
+    if(!name)continue;
     if(/\b(truck|trailer|food\s*truck)\b/i.test(name))continue;
     if(existingSnLower.has(name.toLowerCase()))continue;
-    const sheetName=_findSheetForStore(name,wb.SheetNames);
+    // Find the sheet tab. In new schema col A literally IS the sheet tab name —
+    // trust that first. Fall back to fuzzy matching by display name.
+    let sheetName=null;
+    if(schema.sheetTabCol!=null){
+      const stCell=ws[XLSX.utils.encode_cell({r,c:schema.sheetTabCol})];
+      if(stCell&&stCell.v!=null){
+        const candidate=String(stCell.v).trim();
+        // Case-insensitive match against actual sheet names in the workbook
+        const hit=wb.SheetNames.find(sn=>sn.toLowerCase()===candidate.toLowerCase());
+        if(hit)sheetName=hit;
+      }
+    }
+    if(!sheetName)sheetName=_findSheetForStore(name,wb.SheetNames);
     if(!sheetName)continue;
     if(existingAliasSheets.has(sheetName))continue;
-    if(SS.includes(sheetName)&&SN[sheetName])continue; // already a store key
+    if(SS.includes(sheetName)&&SN[sheetName])continue;
     const key=_makeStoreKey(name,sheetName);
     if(SS.includes(key))continue;
     SS.push(key);
@@ -1478,17 +1518,33 @@ function parseStoreList(wb){
     return null;
   }
 
+  // Auto-detect schema (old: col A=number, new: col A=sheet tab name, col B=number)
+  const schema=(typeof _detectStoreListSchema==='function')?_detectStoreListSchema(ws,rng):{numCol:0,sheetTabCol:null,nameCol:1};
+  if(!schema)return{};
   const result={};
   for(let r=0;r<=Math.min(rng.e.r,200);r++){
-    const numCell=ws[XLSX.utils.encode_cell({r,c:0})];
+    const numCell=ws[XLSX.utils.encode_cell({r,c:schema.numCol})];
     if(!numCell||numCell.t!=='n')continue;
     const num=Math.round(numCell.v);
     if(num<1000||num>999999)continue; // must be a plausible store number
 
-    // Find SS key: first by number (fastest), then by name
+    // Find SS key: first by number (fastest), then by sheet-tab name (new schema), then by display name
     let sk=numRev[num]||null;
+    // New schema: col A IS the sheet tab name — match it directly to SS or SHEET_ALIAS
+    if(!sk&&schema.sheetTabCol!=null){
+      const stCell=ws[XLSX.utils.encode_cell({r,c:schema.sheetTabCol})];
+      if(stCell&&stCell.v!=null){
+        const cand=String(stCell.v).trim();
+        const candL=cand.toLowerCase();
+        const exact=SS.find(s=>s.toLowerCase()===candL);
+        if(exact)sk=exact;
+        else if(SHEET_ALIAS[cand])sk=SHEET_ALIAS[cand];
+      }
+    }
+    // Fall back to display-name fuzzy match
     if(!sk){
-      const nmCell=ws[XLSX.utils.encode_cell({r,c:1})];
+      const nameCol=schema.nameCol;
+      const nmCell=ws[XLSX.utils.encode_cell({r,c:nameCol})];
       sk=nmCell&&nmCell.v?_matchName(String(nmCell.v)):null;
     }
     // Don't overwrite an existing mapping with a new number — first-match-wins
