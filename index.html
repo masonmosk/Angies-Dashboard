@@ -217,11 +217,11 @@ input[type=file]{display:none}
 #cmpTbl .cmp-group-hdr{font-size:11px;text-transform:uppercase;letter-spacing:.4px;border-bottom:2px solid rgba(255,255,255,.3)}
 #cmpTbl .cmp-group-edge{border-left:2px solid var(--bdr)!important}
 #cmpTbl thead .cmp-group-edge{border-left:2px solid rgba(255,255,255,.45)!important}
-#cmpTbl td:first-child,#cmpTbl th:first-child{position:sticky;left:0;background:inherit;z-index:1;text-align:left}
-#cmpTbl th:first-child{background:var(--navy);z-index:3}
-#cmpTbl td:first-child{background:#fff}
-#cmpTbl tr:nth-child(even) td:first-child{background:#f7f8fb}
-#cmpTbl tr:hover td:first-child{background:#fff5f3!important}
+#cmpTbl td.cmp-metric-col,#cmpTbl th.cmp-metric-col{position:sticky;left:0;background:inherit;z-index:1;text-align:left}
+#cmpTbl th.cmp-metric-col{background:var(--navy);z-index:3}
+#cmpTbl td.cmp-metric-col{background:#fff}
+#cmpTbl tr:nth-child(even) td.cmp-metric-col{background:#f7f8fb}
+#cmpTbl tr:hover td.cmp-metric-col{background:#fff5f3!important}
 /* Chart modal */
 .cmp-modal-overlay{display:none;position:fixed;inset:0;background:rgba(15,20,35,.55);z-index:200;align-items:center;justify-content:center;padding:20px}
 .cmp-modal-overlay.on{display:flex}
@@ -3014,7 +3014,7 @@ function updCompare(){
   // of week columns — makes it easy to scan one store at a time.
   const separateMode=!!CMP.separate&&CMP.locs&&CMP.locs.length>1;
   if(separateMode){
-    html+='<tr><th rowspan="2">Metric</th>';
+    html+='<tr><th rowspan="2" class="cmp-metric-col">Metric</th>';
     const groups=[];
     cols.forEach(c=>{
       const prev=groups[groups.length-1];
@@ -3032,7 +3032,7 @@ function updCompare(){
     });
     html+='</tr>';
   } else {
-    html+='<tr><th>Metric</th>';
+    html+='<tr><th class="cmp-metric-col">Metric</th>';
     cols.forEach(c=>{
       html+=`<th class="cmp-num" style="background:${c.accent}" title="${c.header}">${c.header}</th>`;
     });
@@ -3055,7 +3055,7 @@ function updCompare(){
     const dStr=delta==null?'-':_cmpFmtDelta(delta,m.fmt);
     const pctStr=pctDelta==null?'-':(pctDelta>=0?'+':'')+pctDelta.toFixed(1)+'%';
     let row=`<tr data-mk="${m.k}" onclick="cmpOpenChart('${m.k}')" title="Click for chart">
-      <td><span class="cmp-metric-cat">${m.cat}</span><span class="cmp-metric-label">${m.label}</span></td>`;
+      <td class="cmp-metric-col"><span class="cmp-metric-cat">${m.cat}</span><span class="cmp-metric-label">${m.label}</span></td>`;
     vals.forEach((v,i)=>{
       const groupEdge=separateMode&&i>0&&cols[i-1].storeKey!==cols[i].storeKey;
       row+=`<td class="cmp-num${groupEdge?' cmp-group-edge':''}">${v==null?'-':_cmpFmt(v,m.fmt)}</td>`;
