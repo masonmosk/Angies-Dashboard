@@ -2588,8 +2588,14 @@ function cmpToggleGlobalLocPicker(ev){
   const p=document.getElementById('cmpGlobalLocPicker');if(p)p.classList.toggle('on');
 }
 function cmpToggleGlobalLoc(loc,checked){
-  if(checked){if(!CMP.locs.includes(loc))CMP.locs.push(loc);}
-  else{CMP.locs=CMP.locs.filter(l=>l!==loc);}
+  if(checked){
+    if(!CMP.locs.includes(loc))CMP.locs.push(loc);
+    // Picking a specific district/store drops the "All Stores" aggregate
+    // so the label/data reflects exactly what's checked.
+    if(loc!=='AllStores')CMP.locs=CMP.locs.filter(l=>l!=='AllStores');
+  } else {
+    CMP.locs=CMP.locs.filter(l=>l!==loc);
+  }
   if(!CMP.locs.length)CMP.locs=['AllStores']; // never empty
   _cmpSaveGlobal();
   // Update only the label (don't rebuild the picker so it stays open)
