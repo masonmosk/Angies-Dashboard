@@ -2772,6 +2772,7 @@ function _cmpFmt(v,fmt){
   if(fmt==='0')return v===0?'0':Math.round(v).toLocaleString();
   if(fmt==='0±')return(v>=0?'+':'-')+Math.round(a).toLocaleString();
   if(fmt==='dec')return sign+a.toFixed(2);
+  if(fmt==='dec±')return(v>=0?'+':'-')+a.toFixed(2);
   if(fmt==='time')return tF(v);
   return String(v);
 }
@@ -2785,7 +2786,7 @@ function _cmpFmtDelta(v,fmt){
   if(fmt==='%'||fmt==='%±'){return sgn+(a*100).toFixed(2)+'pp';}
   if(fmt==='$1')return sgn+'$'+a.toFixed(1);
   if(fmt==='0'||fmt==='0±')return sgn+Math.round(a).toLocaleString();
-  if(fmt==='dec')return sgn+a.toFixed(2);
+  if(fmt==='dec'||fmt==='dec±')return sgn+a.toFixed(2);
   if(fmt==='time')return sgn+Math.round(a)+'s';
   return(v>=0?'+':'')+String(v);
 }
