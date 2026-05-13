@@ -2539,13 +2539,17 @@ function _cmpGlobalLocPickerHTML(){
   const allStoreKeys=new Set();
   Object.values(APP.monthly).forEach(pd=>{if(pd&&pd.stores)Object.keys(pd.stores).forEach(s=>allStoreKeys.add(s));});
   const availableStores=SS.filter(s=>allStoreKeys.has(s));
-  const allSelected=availableStores.length>0&&availableStores.every(s=>selSet.has(s));
-  const someSelected=availableStores.some(s=>selSet.has(s));
+  const allStoresSelected=availableStores.length>0&&availableStores.every(s=>selSet.has(s));
+  const allDistrictsSelected=APP.districts.length>0&&APP.districts.every(d=>selSet.has(d.id));
   let html='';
-  // "Select all" toggle — checks every individual store at once so users can
-  // then untoggle the ones they want to exclude.
-  html+=`<label style="font-weight:700;border-bottom:1px solid var(--bdr);padding-bottom:6px;margin-bottom:4px">
-    <input type="checkbox" ${allSelected?'checked':''} ${(!allSelected&&someSelected)?'data-indeterminate="1"':''} onchange="cmpSelectAllStores(this.checked)"> Select all
+  // Two scoped "select all" toggles so the user can pull every store OR every district
+  if(APP.districts.length){
+    html+=`<label style="font-weight:700;border-bottom:1px solid var(--bdr);padding-bottom:6px;margin-bottom:4px;display:flex;align-items:center;gap:6px">
+      <input type="checkbox" ${allDistrictsSelected?'checked':''} onchange="cmpSelectAllScope('districts',this.checked)"> Select all districts
+    </label>`;
+  }
+  html+=`<label style="font-weight:700;border-bottom:1px solid var(--bdr);padding-bottom:6px;margin-bottom:4px;display:flex;align-items:center;gap:6px">
+    <input type="checkbox" ${allStoresSelected?'checked':''} onchange="cmpSelectAllScope('stores',this.checked)"> Select all stores
   </label>`;
   if(APP.districts.length){
     html+='<div class="cmp-loc-grp">Districts</div>';
@@ -2560,27 +2564,32 @@ function _cmpGlobalLocPickerHTML(){
   });
   return html;
 }
-// "Select all" → add every individual store key. Unchecking → clear individuals
-// (falls back to AllStores aggregate so the comparison still has data).
-function cmpSelectAllStores(checked){
+// Generic scoped "select all" — scope is 'districts' or 'stores'.
+// Checking adds every entry in that scope and drops the AllStores aggregate;
+// unchecking clears just that scope (other scope's selections remain).
+function cmpSelectAllScope(scope,checked){
   const allStoreKeys=new Set();
   Object.values(APP.monthly).forEach(pd=>{if(pd&&pd.stores)Object.keys(pd.stores).forEach(s=>allStoreKeys.add(s));});
   const availableStores=SS.filter(s=>allStoreKeys.has(s));
-  if(checked){
-    // Include all individual stores; remove the AllStores aggregate (redundant)
-    CMP.locs=availableStores.slice();
-  } else {
-    // Clear individuals + districts; fall back to AllStores aggregate
-    CMP.locs=['AllStores'];
+  const districtIds=APP.districts.map(d=>d.id);
+  let locs=(CMP.locs||[]).filter(l=>l!=='AllStores');
+  if(scope==='districts'){
+    locs=locs.filter(l=>!districtIds.includes(l));
+    if(checked)locs=locs.concat(districtIds);
+  } else if(scope==='stores'){
+    locs=locs.filter(l=>!availableStores.includes(l));
+    if(checked)locs=locs.concat(availableStores);
   }
+  CMP.locs=locs.length?locs:['AllStores'];
   _cmpSaveGlobal();
-  // Rebuild the picker (so individual checkboxes reflect the new state),
-  // but keep it OPEN so the user can keep clicking.
+  // Rebuild the picker so other checkboxes update, but keep it OPEN
   const picker=document.getElementById('cmpGlobalLocPicker');
   if(picker){const wasOpen=picker.classList.contains('on');picker.innerHTML=_cmpGlobalLocPickerHTML();if(wasOpen)picker.classList.add('on');}
   const lblEl=document.getElementById('cmpGlobalLocLabel');if(lblEl)lblEl.textContent=_cmpLocsLabel(CMP.locs);
   updCompare();_cmpReRenderChartIfOpen();
 }
+// Back-compat alias in case anything else references the old name
+function cmpSelectAllStores(checked){cmpSelectAllScope('stores',checked);}
 function cmpToggleGlobalLocPicker(ev){
   if(ev)ev.stopPropagation();
   // Close any per-row pickers (legacy) and toggle global
@@ -2654,6 +2663,11 @@ function _cmpLocsLabel(locs){
   const availableStores=SS.filter(s=>allStoreKeys.has(s));
   if(availableStores.length&&availableStores.every(s=>locs.includes(s))&&!locs.some(l=>l==='AllStores'||APP.districts.find(d=>d.id===l))){
     return`All ${availableStores.length} stores`;
+  }
+  // If "every district" is selected (and nothing else), show a concise label
+  const districtIds=APP.districts.map(d=>d.id);
+  if(districtIds.length&&districtIds.every(id=>locs.includes(id))&&locs.every(l=>districtIds.includes(l))){
+    return`All ${districtIds.length} districts`;
   }
   // Otherwise: count + first few names
   const names=locs.map(l=>{
