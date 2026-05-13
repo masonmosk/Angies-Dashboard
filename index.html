@@ -173,15 +173,18 @@ input[type=file]{display:none}
 .cmp-metric-group-toggle{font-size:9px;color:var(--red);cursor:pointer;font-weight:600;text-transform:none;letter-spacing:0}
 .cmp-metric-item{display:flex;align-items:center;gap:6px;padding:3px 0;font-size:12px;cursor:pointer;color:var(--navy)}
 .cmp-metric-item input{cursor:pointer;accent-color:var(--red)}
-#cmpTbl th{background:var(--navy);color:#fff;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.3px;padding:8px 10px}
+#cmpTbl th{background:var(--navy);color:#fff;text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.3px;padding:6px 8px;line-height:1.2}
 #cmpTbl th.cmp-num,#cmpTbl td.cmp-num{text-align:right;white-space:nowrap}
-#cmpTbl td{padding:7px 10px;font-size:12.5px;border-bottom:1px solid var(--bdr)}
+#cmpTbl td{padding:4px 8px;font-size:12px;border-bottom:1px solid var(--bdr);line-height:1.3}
 #cmpTbl tr:nth-child(even) td{background:#f7f8fb}
 .cmp-delta-pos{color:#1a6a35;font-weight:600}
 .cmp-delta-neg{color:#b81e08;font-weight:600}
 .cmp-delta-neu{color:var(--gtxt)}
 .cmp-metric-label{color:var(--navy);font-weight:600}
-.cmp-metric-cat{color:var(--gtxt);font-size:10px;text-transform:uppercase;letter-spacing:.4px;margin-right:8px;padding:2px 6px;background:#eef1f7;border-radius:4px;display:inline-block;min-width:54px;text-align:center}
+.cmp-metric-cat{color:var(--gtxt);font-size:9px;text-transform:uppercase;letter-spacing:.3px;margin-right:6px;padding:1px 5px;background:#eef1f7;border-radius:3px;display:inline-block;min-width:46px;text-align:center;vertical-align:middle}
+.cmp-cell-best{background:rgba(39,174,96,.15)!important;color:#1a6a35;font-weight:700}
+.cmp-cell-worst{background:rgba(232,67,42,.15)!important;color:#b81e08;font-weight:700}
+.cmp-cell-mid{color:var(--navy)}
 /* Global stores selector bar */
 .cmp-stores-bar{display:flex;align-items:center;gap:14px;background:#f0f4ff;border:1px solid #d1d9eb;border-radius:10px;padding:10px 14px;margin-bottom:12px;flex-wrap:wrap}
 .cmp-stores-label{font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--navy);flex-shrink:0}
@@ -745,7 +748,17 @@ input[type=file]{display:none}
     <div class="pan" id="pan-compare">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:10px">
         <div class="ct" style="margin-bottom:0">⇄ Comparison</div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--navy)">Quick:
+            <select id="cmpQuickWeeks" onchange="cmpQuickPick(parseInt(this.value)||0)" style="padding:5px 8px;border:1px solid var(--bdr);border-radius:6px;font-size:12px;background:var(--wh);color:var(--navy)">
+              <option value="0">— pick —</option>
+              <option value="2">Last 2 weeks</option>
+              <option value="4">Last 4 weeks</option>
+              <option value="6">Last 6 weeks</option>
+              <option value="8">Last 8 weeks</option>
+              <option value="13">Last 13 weeks (period)</option>
+            </select>
+          </label>
           <button class="bp" onclick="cmpAddSelection()">+ Add Comparison</button>
           <button class="bp" onclick="cmpExport()" title="Export comparison to Excel">⬇ Export</button>
           <button class="bp" onclick="cmpSelectAll(true)">Select all metrics</button>
@@ -2651,6 +2664,42 @@ function cmpRemoveSelection(id){
   _cmpSaveSelections();_cmpRenderSelections();updCompare();_cmpReRenderChartIfOpen();
 }
 
+// All loaded weeks across all loaded periods, sorted MOST RECENT first.
+function _cmpAllWeeksChronological(){
+  const out=[];
+  const today=new Date();
+  Object.entries(APP.monthly).forEach(([periodKey,pd])=>{
+    if(!pd||!pd.all)return;
+    (pd.weeks||[]).forEach(wk=>{
+      const sd=pd.all[wk]&&pd.all[wk].sd;if(!sd)return;
+      const p=sd.split('-');if(p.length<2)return;
+      const mm=parseInt(p[0]),dd=parseInt(p[1]);
+      // Fiscal year: Jan-Jun = current calendar year; Jul-Dec = prior
+      const yr=mm<=6?today.getFullYear():today.getFullYear()-1;
+      out.push({period:periodKey,week:wk,epoch:Date.UTC(yr,mm-1,dd)});
+    });
+  });
+  return out.sort((a,b)=>b.epoch-a.epoch); // descending: most recent first
+}
+
+// Replace the comparison selections with the most-recent N weeks
+function cmpQuickPick(n){
+  if(!n||n<=0)return;
+  const all=_cmpAllWeeksChronological();
+  // Skip any weeks that are entirely future (no sales data yet)
+  const seeded=all.filter(x=>{
+    const pd=APP.monthly[x.period];
+    return pd&&pd.all&&pd.all[x.week]&&pd.all[x.week].m&&pd.all[x.week].m.acS&&pd.all[x.week].m.acS.w>0;
+  });
+  const picked=(seeded.length>=n?seeded:all).slice(0,n);
+  if(!picked.length){showToast('No loaded weeks to populate.',3000);return;}
+  CMP.selections=picked.map(x=>({id:_cmpNewId(),period:x.period,week:x.week}));
+  _cmpSaveSelections();_cmpRenderSelections();updCompare();_cmpReRenderChartIfOpen();
+  // Reset the dropdown so the user can re-pick the same option later
+  const sel=document.getElementById('cmpQuickWeeks');if(sel)sel.value='0';
+  showToast(`Loaded the last <strong>${picked.length}</strong> week${picked.length>1?'s':''} into the comparison.`,3000);
+}
+
 // ── Metric picker (unchanged) ──
 function _cmpBuildMetricsBox(){
   const box=document.getElementById('cmpMetricsBox');if(!box)return;
@@ -2851,7 +2900,10 @@ function _cmpColValue(col,mk){
   return(v==null||isNaN(v))?null:v;
 }
 
-// Render the comparison table — N columns + relative delta against the first column
+// Metrics where lower values are "better" (less labor %, faster SOS, fewer complaints)
+const _CMP_LOWER_BETTER=new Set(['aLP','pLP','alLP','plLP','_acc','win','winL','winD','winB','kio','kioL','kioD','kioB','comp','wgV']);
+
+// Render the comparison table — N columns + (Δ when 2 cols) or color-coded cells (when 3+ cols)
 function updCompare(){
   const tbl=document.getElementById('cmpTbl');if(!tbl)return;
   if(!CMP._initialized&&Object.keys(APP.monthly).length){initCompare();}
@@ -2859,12 +2911,16 @@ function updCompare(){
   if(!CMP.metrics||!CMP.metrics.length){tbl.innerHTML='<thead><tr><th>Select at least one metric above to compare</th></tr></thead>';return;}
   const cols=_cmpExpandColumns();
   if(!cols.length){tbl.innerHTML='<thead><tr><th>Add a comparison to begin</th></tr></thead>';return;}
+  // Δ columns are only useful when comparing exactly 2 columns; with 3+ they
+  // require the reader to constantly reference back to column #1 — instead we
+  // color-code each cell green (best) / red (worst) per row for at-a-glance scanning.
+  const showDelta=cols.length===2;
   // Header row
   let html='<thead><tr><th>Metric</th>';
-  cols.forEach((c,i)=>{
+  cols.forEach(c=>{
     html+=`<th class="cmp-num" style="background:${c.accent}" title="${c.header}">${c.header}</th>`;
   });
-  if(cols.length>=2)html+='<th class="cmp-num" title="Difference vs column #1">Δ vs #1</th><th class="cmp-num">Δ %</th>';
+  if(showDelta)html+='<th class="cmp-num" title="Difference vs column #1">Δ vs #1</th><th class="cmp-num">Δ %</th>';
   html+='</tr></thead><tbody>';
   // Body — iterate EXPORT_METRICS so order mirrors Excel sheet
   const _selSet=new Set(CMP.metrics);
@@ -2872,20 +2928,33 @@ function updCompare(){
   const _rowsForExport=[];
   selMetrics.forEach(m=>{
     const vals=cols.map(c=>_cmpColValue(c,m.k));
-    const v1=vals[0];
-    const vLast=vals[vals.length-1];
-    const hasFirst=v1!=null;
-    const hasLast=vLast!=null;
-    const delta=cols.length>=2&&hasFirst&&hasLast?(vLast-v1):null;
+    const lowerBetter=_CMP_LOWER_BETTER.has(m.k);
+    // Compute best/worst across this row's values (excluding null/zero)
+    const valid=vals.filter(v=>v!=null&&v!==0);
+    let best=null,worst=null;
+    if(valid.length>=2){
+      best=lowerBetter?Math.min(...valid):Math.max(...valid);
+      worst=lowerBetter?Math.max(...valid):Math.min(...valid);
+      if(best===worst){best=null;worst=null;} // all equal — skip coloring
+    }
+    // Delta vs first column (only used when 2 cols)
+    const v1=vals[0],vLast=vals[vals.length-1];
+    const delta=showDelta&&v1!=null&&vLast!=null?(vLast-v1):null;
     const pctDelta=delta!=null&&v1!==0?(delta/Math.abs(v1))*100:null;
-    const lowerBetter=['aLP','pLP','alLP','plLP','_acc','win','winL','winD','winB','kio','kioL','kioD','kioB','comp','wgV'].includes(m.k);
     const dCls=delta==null||delta===0?'cmp-delta-neu':((delta>0)===lowerBetter?'cmp-delta-neg':'cmp-delta-pos');
     const dStr=delta==null?'-':_cmpFmtDelta(delta,m.fmt);
     const pctStr=pctDelta==null?'-':(pctDelta>=0?'+':'')+pctDelta.toFixed(1)+'%';
     let row=`<tr data-mk="${m.k}" onclick="cmpOpenChart('${m.k}')" title="Click for chart">
       <td><span class="cmp-metric-cat">${m.cat}</span><span class="cmp-metric-label">${m.label}</span></td>`;
-    vals.forEach(v=>{row+=`<td class="cmp-num">${v==null?'-':_cmpFmt(v,m.fmt)}</td>`;});
-    if(cols.length>=2)row+=`<td class="cmp-num ${dCls}">${dStr}</td><td class="cmp-num ${dCls}">${pctStr}</td>`;
+    vals.forEach(v=>{
+      let cellCls='cmp-num';
+      if(!showDelta&&v!=null&&v!==0){
+        if(v===best)cellCls+=' cmp-cell-best';
+        else if(v===worst)cellCls+=' cmp-cell-worst';
+      }
+      row+=`<td class="${cellCls}">${v==null?'-':_cmpFmt(v,m.fmt)}</td>`;
+    });
+    if(showDelta)row+=`<td class="cmp-num ${dCls}">${dStr}</td><td class="cmp-num ${dCls}">${pctStr}</td>`;
     row+='</tr>';
     html+=row;
     // Stash flat data for export
