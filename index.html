@@ -1273,7 +1273,7 @@ async function _pushConfigToServer(){
   try{
     if(!_ghToken())return false;
     const email=localStorage.getItem('angies_auth_email')||'unknown@angies.com';
-    const payload={districts:APP.districts,labels:APP.labels,goals:APP.goals,_cfgVer:2,updatedBy:email,updatedAt:new Date().toISOString()};
+    const payload={districts:APP.districts,labels:APP.labels,goals:APP.goals,weekNotes:APP.weekNotes||{},_cfgVer:2,updatedBy:email,updatedAt:new Date().toISOString()};
     await _ghWrite('config.json',payload,'Sync config — '+email);
     console.log('[Sync] Config pushed to GitHub');
     return true;
@@ -1300,6 +1300,13 @@ async function _pullConfigFromServer(){
     }
     if(cfg.goals&&Object.keys(cfg.goals).length){APP.goals=Object.assign({},APP.goals,cfg.goals);changed=true;}
     if(cfg.labels&&Object.keys(cfg.labels).length){APP.labels=Object.assign({},APP.labels,cfg.labels);changed=true;}
+    if(cfg.weekNotes&&typeof cfg.weekNotes==='object'){
+      APP.weekNotes=Object.assign({},APP.weekNotes||{},cfg.weekNotes);
+      if(typeof _saveWeekNotes==='function')_saveWeekNotes();
+      changed=true;
+      if(typeof renderWeekNoteBanner==='function')renderWeekNoteBanner();
+      if(document.getElementById('weekNotesEditor')&&typeof _renderWeekNotesEditor==='function')_renderWeekNotesEditor();
+    }
     if(changed){dbSaveConfig().catch(()=>{});console.log('[Sync] Config pulled from GitHub');}
     return changed;
   }catch(err){console.warn('[Sync] Config pull failed:',err.message);return false;}
@@ -4449,26 +4456,29 @@ function saveWeekNote(key,val){
   _saveWeekNotes();
   // Refresh the dashboard banner in case the current week's note changed
   if(typeof renderWeekNoteBanner==='function')renderWeekNoteBanner();
+  // Push to GitHub so teammates see the update
+  if(typeof _pushConfigToServer==='function')_pushConfigToServer().catch(()=>{});
 }
-// Banner shown above the data area when the currently-selected week has a note
+// Static banner pinned to the top of the page when the currently-selected week has a note
 function renderWeekNoteBanner(){
   if(!APP.weekNotes)APP.weekNotes=_loadWeekNotes();
   let banner=document.getElementById('weekNoteBanner');
   const wk=APP.week;
   const periodKey=APP.period;
   const note=(wk&&wk!=='_period'&&periodKey)?APP.weekNotes[_weekNoteKey(periodKey,wk)]:null;
-  if(!note){if(banner)banner.style.display='none';return;}
+  if(!note){if(banner)banner.style.display='none';document.body.style.paddingTop='';return;}
   if(!banner){
     banner=document.createElement('div');
     banner.id='weekNoteBanner';
-    banner.style.cssText='margin:10px 0;padding:10px 14px;background:linear-gradient(90deg,#fff7e6 0%,#fffaf0 100%);border-left:4px solid var(--gold);border-radius:6px;display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:13px;color:var(--navy)';
-    const target=document.querySelector('.cnt')||document.getElementById('dashContent');
-    if(target&&target.parentElement)target.parentElement.insertBefore(banner,target);
-    else document.body.appendChild(banner);
+    banner.style.cssText='position:fixed;top:0;left:0;right:0;z-index:9999;margin:0;padding:8px 18px;background:linear-gradient(90deg,#fff7e6 0%,#fffaf0 100%);border-bottom:3px solid var(--gold);display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:13px;color:var(--navy);box-shadow:0 2px 6px rgba(0,0,0,0.12)';
+    // Append to <body> — fixed positioning takes it out of flow so order doesn't matter
+    document.body.appendChild(banner);
   }
   banner.innerHTML=`<div><span style="font-weight:700">📌 ${wk.replace('Week ','Wk ')} note:</span> ${note}</div>
-    <button onclick="this.parentElement.style.display='none'" style="background:transparent;border:0;color:var(--gtxt);font-size:18px;cursor:pointer;line-height:1;padding:0 4px" title="Dismiss for this session">×</button>`;
+    <button onclick="document.getElementById('weekNoteBanner').style.display='none';document.body.style.paddingTop='';" style="background:transparent;border:0;color:var(--gtxt);font-size:18px;cursor:pointer;line-height:1;padding:0 4px" title="Dismiss for this session">×</button>`;
   banner.style.display='flex';
+  // Push the page down so the fixed banner doesn't cover the header
+  requestAnimationFrame(()=>{document.body.style.paddingTop=banner.offsetHeight+'px';});
 }
 function applyGoals(){
   autoSaveConfig();
