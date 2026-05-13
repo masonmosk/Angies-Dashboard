@@ -214,6 +214,9 @@ input[type=file]{display:none}
 #cmpTbl thead th{position:sticky;top:0;z-index:2}
 #cmpTbl tbody tr{cursor:pointer;transition:background .12s}
 #cmpTbl tbody tr:hover td{background:#fff5f3!important}
+#cmpTbl .cmp-group-hdr{font-size:11px;text-transform:uppercase;letter-spacing:.4px;border-bottom:2px solid rgba(255,255,255,.3)}
+#cmpTbl .cmp-group-edge{border-left:2px solid var(--bdr)!important}
+#cmpTbl thead .cmp-group-edge{border-left:2px solid rgba(255,255,255,.45)!important}
 #cmpTbl td:first-child,#cmpTbl th:first-child{position:sticky;left:0;background:inherit;z-index:1;text-align:left}
 #cmpTbl th:first-child{background:var(--navy);z-index:3}
 #cmpTbl td:first-child{background:#fff}
@@ -2528,8 +2531,15 @@ function _cmpGlobalLocPickerHTML(){
   // Aggregate which stores are available across ALL loaded periods
   const allStoreKeys=new Set();
   Object.values(APP.monthly).forEach(pd=>{if(pd&&pd.stores)Object.keys(pd.stores).forEach(s=>allStoreKeys.add(s));});
+  const availableStores=SS.filter(s=>allStoreKeys.has(s));
+  const allSelected=availableStores.length>0&&availableStores.every(s=>selSet.has(s));
+  const someSelected=availableStores.some(s=>selSet.has(s));
   let html='';
-  html+=`<label><input type="checkbox" ${selSet.has('AllStores')?'checked':''} onchange="cmpToggleGlobalLoc('AllStores',this.checked)"> All Stores</label>`;
+  // "Select all" toggle — checks every individual store at once so users can
+  // then untoggle the ones they want to exclude.
+  html+=`<label style="font-weight:700;border-bottom:1px solid var(--bdr);padding-bottom:6px;margin-bottom:4px">
+    <input type="checkbox" ${allSelected?'checked':''} ${(!allSelected&&someSelected)?'data-indeterminate="1"':''} onchange="cmpSelectAllStores(this.checked)"> Select all
+  </label>`;
   if(APP.districts.length){
     html+='<div class="cmp-loc-grp">Districts</div>';
     APP.districts.forEach(d=>{
@@ -2537,13 +2547,32 @@ function _cmpGlobalLocPickerHTML(){
     });
   }
   html+='<div class="cmp-loc-grp">Individual Stores</div>';
-  SS.forEach(s=>{
-    if(allStoreKeys.has(s)){
-      const lbl=(STNUM[s]?STNUM[s]+' ':'')+(SN[s]||s);
-      html+=`<label><input type="checkbox" ${selSet.has(s)?'checked':''} onchange="cmpToggleGlobalLoc('${s}',this.checked)"> ${lbl}</label>`;
-    }
+  availableStores.forEach(s=>{
+    const lbl=(STNUM[s]?STNUM[s]+' ':'')+(SN[s]||s);
+    html+=`<label><input type="checkbox" ${selSet.has(s)?'checked':''} onchange="cmpToggleGlobalLoc('${s}',this.checked)"> ${lbl}</label>`;
   });
   return html;
+}
+// "Select all" → add every individual store key. Unchecking → clear individuals
+// (falls back to AllStores aggregate so the comparison still has data).
+function cmpSelectAllStores(checked){
+  const allStoreKeys=new Set();
+  Object.values(APP.monthly).forEach(pd=>{if(pd&&pd.stores)Object.keys(pd.stores).forEach(s=>allStoreKeys.add(s));});
+  const availableStores=SS.filter(s=>allStoreKeys.has(s));
+  if(checked){
+    // Include all individual stores; remove the AllStores aggregate (redundant)
+    CMP.locs=availableStores.slice();
+  } else {
+    // Clear individuals + districts; fall back to AllStores aggregate
+    CMP.locs=['AllStores'];
+  }
+  _cmpSaveGlobal();
+  // Rebuild the picker (so individual checkboxes reflect the new state),
+  // but keep it OPEN so the user can keep clicking.
+  const picker=document.getElementById('cmpGlobalLocPicker');
+  if(picker){const wasOpen=picker.classList.contains('on');picker.innerHTML=_cmpGlobalLocPickerHTML();if(wasOpen)picker.classList.add('on');}
+  const lblEl=document.getElementById('cmpGlobalLocLabel');if(lblEl)lblEl.textContent=_cmpLocsLabel(CMP.locs);
+  updCompare();_cmpReRenderChartIfOpen();
 }
 function cmpToggleGlobalLocPicker(ev){
   if(ev)ev.stopPropagation();
@@ -2606,7 +2635,14 @@ function _cmpLocsLabel(locs){
     if(di)return '📍 '+di.name;
     return(SN[loc]||loc)+(STNUM[loc]?' ('+STNUM[loc]+')':'');
   }
-  // Multiple — count + labels truncated
+  // If "every individual store" is selected, show a concise label
+  const allStoreKeys=new Set();
+  Object.values(APP.monthly).forEach(pd=>{if(pd&&pd.stores)Object.keys(pd.stores).forEach(s=>allStoreKeys.add(s));});
+  const availableStores=SS.filter(s=>allStoreKeys.has(s));
+  if(availableStores.length&&availableStores.every(s=>locs.includes(s))&&!locs.some(l=>l==='AllStores'||APP.districts.find(d=>d.id===l))){
+    return`All ${availableStores.length} stores`;
+  }
+  // Otherwise: count + first few names
   const names=locs.map(l=>{
     if(l==='AllStores')return 'All';
     const di=APP.districts.find(d=>d.id===l);
@@ -2878,24 +2914,31 @@ function _cmpExpandColumns(){
   const cols=[];
   const globalLocs=(CMP.locs&&CMP.locs.length)?CMP.locs:['AllStores'];
   const separate=!!CMP.separate&&globalLocs.length>1;
-  CMP.selections.forEach((sel,idx)=>{
-    const accent=CMP_COLORS[idx%CMP_COLORS.length];
-    if(separate){
-      globalLocs.forEach(loc=>{
+  if(separate){
+    // Group columns BY STORE so each store's set of week columns sits together —
+    // easier to scan a single store's trend across weeks at a glance.
+    // Color accent goes by STORE (not selection) in this mode so each store's
+    // group is visually unified.
+    globalLocs.forEach((loc,storeIdx)=>{
+      const storeAccent=CMP_COLORS[storeIdx%CMP_COLORS.length];
+      CMP.selections.forEach((sel,selIdx)=>{
         cols.push({
-          selId:sel.id,selIdx:idx,accent,period:sel.period,week:sel.week,
-          locs:[loc],
-          header:_cmpHeaderLabel(sel,[loc],idx,true) // show store since stores differ per column
+          selId:sel.id,selIdx,accent:storeAccent,period:sel.period,week:sel.week,
+          locs:[loc],storeKey:loc,
+          header:_cmpHeaderLabel(sel,[loc],selIdx,true)
         });
       });
-    } else {
+    });
+  } else {
+    CMP.selections.forEach((sel,idx)=>{
+      const accent=CMP_COLORS[idx%CMP_COLORS.length];
       cols.push({
         selId:sel.id,selIdx:idx,accent,period:sel.period,week:sel.week,
         locs:globalLocs.slice(),
-        header:_cmpHeaderLabel(sel,globalLocs,idx,false) // hide store — it's shared across all columns
+        header:_cmpHeaderLabel(sel,globalLocs,idx,false)
       });
-    }
-  });
+    });
+  }
   return cols;
 }
 // Short column header: "#1 · P5 W1 FY26" (no store when shared); when stores
@@ -2936,12 +2979,37 @@ function updCompare(){
   // color-code each cell green (best) / red (worst) per row for at-a-glance scanning.
   const showDelta=cols.length===2;
   // Header row
-  let html='<thead><tr><th>Metric</th>';
-  cols.forEach(c=>{
-    html+=`<th class="cmp-num" style="background:${c.accent}" title="${c.header}">${c.header}</th>`;
-  });
-  if(showDelta)html+='<th class="cmp-num" title="Difference vs column #1">Δ vs #1</th><th class="cmp-num">Δ %</th>';
-  html+='</tr></thead><tbody>';
+  let html='<thead>';
+  // In separate mode, show a top-level store header that spans each store's set
+  // of week columns — makes it easy to scan one store at a time.
+  const separateMode=!!CMP.separate&&CMP.locs&&CMP.locs.length>1;
+  if(separateMode){
+    html+='<tr><th rowspan="2">Metric</th>';
+    const groups=[];
+    cols.forEach(c=>{
+      const prev=groups[groups.length-1];
+      if(prev&&prev.storeKey===c.storeKey){prev.span++;}
+      else{groups.push({storeKey:c.storeKey,accent:c.accent,span:1,label:_cmpLocLabel(c.storeKey)});}
+    });
+    groups.forEach(g=>{
+      html+=`<th colspan="${g.span}" class="cmp-num cmp-group-hdr" style="background:${g.accent};text-align:center" title="${g.label}">${g.label}</th>`;
+    });
+    if(showDelta)html+='<th rowspan="2" class="cmp-num">Δ vs #1</th><th rowspan="2" class="cmp-num">Δ %</th>';
+    html+='</tr><tr>';
+    cols.forEach((c,i)=>{
+      const isGroupEdge=i>0&&cols[i-1].storeKey!==c.storeKey;
+      html+=`<th class="cmp-num${isGroupEdge?' cmp-group-edge':''}" style="background:${c.accent};opacity:.88" title="${c.header}">${c.header.replace(/^#\d+ · /,'')}</th>`;
+    });
+    html+='</tr>';
+  } else {
+    html+='<tr><th>Metric</th>';
+    cols.forEach(c=>{
+      html+=`<th class="cmp-num" style="background:${c.accent}" title="${c.header}">${c.header}</th>`;
+    });
+    if(showDelta)html+='<th class="cmp-num" title="Difference vs column #1">Δ vs #1</th><th class="cmp-num">Δ %</th>';
+    html+='</tr>';
+  }
+  html+='</thead><tbody>';
   // Body — iterate EXPORT_METRICS so order mirrors Excel sheet
   const _selSet=new Set(CMP.metrics);
   const selMetrics=EXPORT_METRICS.filter(m=>_selSet.has(m.k));
@@ -2958,7 +3026,10 @@ function updCompare(){
     const pctStr=pctDelta==null?'-':(pctDelta>=0?'+':'')+pctDelta.toFixed(1)+'%';
     let row=`<tr data-mk="${m.k}" onclick="cmpOpenChart('${m.k}')" title="Click for chart">
       <td><span class="cmp-metric-cat">${m.cat}</span><span class="cmp-metric-label">${m.label}</span></td>`;
-    vals.forEach(v=>{row+=`<td class="cmp-num">${v==null?'-':_cmpFmt(v,m.fmt)}</td>`;});
+    vals.forEach((v,i)=>{
+      const groupEdge=separateMode&&i>0&&cols[i-1].storeKey!==cols[i].storeKey;
+      row+=`<td class="cmp-num${groupEdge?' cmp-group-edge':''}">${v==null?'-':_cmpFmt(v,m.fmt)}</td>`;
+    });
     if(showDelta)row+=`<td class="cmp-num ${dCls}">${dStr}</td><td class="cmp-num ${dCls}">${pctStr}</td>`;
     row+='</tr>';
     html+=row;
@@ -2977,6 +3048,18 @@ function cmpOpenChart(mk){
   _cmpRenderChart();
   document.getElementById('cmpChartModal').classList.add('on');
 }
+// Short header for a single selection (no store) — used as x-axis label
+// when stores are split into separate datasets.
+function _cmpSelOnlyHeader(sel,idx){
+  const periodStr=String(sel.period||'');
+  const fyMatch=periodStr.match(/(FY\d+)/i);
+  const pNumMatch=periodStr.match(/Period\s+(\d+)/i);
+  const shortP=pNumMatch?'P'+pNumMatch[1]:periodStr;
+  const shortW=sel.week==='_period'?'Period':String(sel.week||'').replace(/^Week\s+(\d+)/i,'W$1');
+  const head=fyMatch?`${shortP} ${shortW} ${fyMatch[1]}`:`${shortP} ${shortW}`;
+  return`#${idx+1} · ${head}`;
+}
+
 function _cmpRenderChart(){
   const mk=CMP._chartMetric;if(!mk)return;
   const m=EXPORT_METRICS.find(x=>x.k===mk);if(!m)return;
@@ -2989,31 +3072,68 @@ function _cmpRenderChart(){
   document.getElementById('cmpChartTitle').textContent=`${m.cat} — ${m.label}`;
   if(CMP._chart){try{CMP._chart.destroy();}catch(e){}CMP._chart=null;}
   const canvas=document.getElementById('cmpChartCanvas');if(!canvas)return;
-  // X-axis = the comparison columns in their selected order (drag to reorder).
-  // Each column is one point; the line shows how the metric trends across the
-  // dimensions being compared (weeks, periods, stores — whatever is in the rows).
-  const labels=cols.map(c=>c.header);
-  const vals=cols.map(c=>_cmpColValue(c,mk));
-  const data=vals.map(v=>v==null?null:v*scale);
-  const pointColors=cols.map(c=>c.accent);
-  CMP._chart=new Chart(canvas,{
-    type:'line',
-    data:{labels,datasets:[{
-      label:m.label,
-      data,
-      borderColor:'#94a3b8',           // neutral gray line connecting all points
+  const globalLocs=(CMP.locs&&CMP.locs.length)?CMP.locs:['AllStores'];
+  const separate=!!CMP.separate&&globalLocs.length>1;
+
+  let chartData,chartOptions;
+  if(separate){
+    // ── Separate mode: one line per store ──
+    // X-axis = selections (week comparisons); each store gets its own colored line
+    // so trends per store are immediately distinguishable instead of zig-zagging.
+    const labels=CMP.selections.map((s,i)=>_cmpSelOnlyHeader(s,i));
+    const datasets=globalLocs.map((loc,storeIdx)=>{
+      const color=CMP_COLORS[storeIdx%CMP_COLORS.length];
+      const data=CMP.selections.map(s=>{
+        const d=_cmpAggregateLocs(s.period,[loc]);
+        if(!d)return null;
+        const v=_cmpCompute(d,s.week,mk);
+        return(v==null||isNaN(v))?null:v*scale;
+      });
+      return{
+        label:_cmpLocLabel(loc),
+        data,
+        borderColor:color,
+        backgroundColor:color+'22',
+        pointBackgroundColor:color,
+        pointBorderColor:'#fff',
+        pointBorderWidth:2,
+        pointRadius:6,
+        pointHoverRadius:8,
+        borderWidth:2.5,
+        fill:false,
+        tension:.25,
+        spanGaps:true
+      };
+    });
+    chartData={labels,datasets};
+    chartOptions={
+      responsive:true,maintainAspectRatio:false,
+      plugins:{
+        legend:{position:'bottom',labels:{boxWidth:14,padding:10,font:{size:11}}},
+        tooltip:{callbacks:{label:c=>c.dataset.label+': '+tooltipFmt(c.raw||0)}}
+      },
+      scales:{
+        x:{ticks:{font:{size:11},maxRotation:25,minRotation:0,autoSkip:false}},
+        y:{beginAtZero:false,grace:'8%',ticks:{callback:v=>{if(unit==='$')return'$'+(v>=1000?Math.round(v/1000)+'k':v);if(unit==='%')return v.toFixed(1)+'%';if(unit==='s')return tF(v);return v;}}}
+      },
+      layout:{padding:{top:28,right:8}}
+    };
+  } else {
+    // ── Combined mode: single line through all columns ──
+    const labels=cols.map(c=>c.header);
+    const vals=cols.map(c=>_cmpColValue(c,mk));
+    const data=vals.map(v=>v==null?null:v*scale);
+    const pointColors=cols.map(c=>c.accent);
+    chartData={labels,datasets:[{
+      label:m.label,data,
+      borderColor:'#94a3b8',
       backgroundColor:'rgba(148,163,184,.10)',
-      pointBackgroundColor:pointColors, // each point coloured by its selection accent
+      pointBackgroundColor:pointColors,
       pointBorderColor:'#fff',
-      pointBorderWidth:2,
-      pointRadius:7,
-      pointHoverRadius:9,
-      borderWidth:2.5,
-      fill:false,
-      tension:0,                       // straight segments — clearer point-to-point comparison
-      spanGaps:true
-    }]},
-    options:{
+      pointBorderWidth:2,pointRadius:7,pointHoverRadius:9,borderWidth:2.5,
+      fill:false,tension:0,spanGaps:true
+    }]};
+    chartOptions={
       responsive:true,maintainAspectRatio:false,
       plugins:{
         legend:{display:false},
@@ -3021,14 +3141,12 @@ function _cmpRenderChart(){
       },
       scales:{
         x:{ticks:{font:{size:11},maxRotation:25,minRotation:0,autoSkip:false}},
-        // Tight y-axis: auto-fit to the actual data range with a small grace
-        // pad so subtle changes are easier to see (vs always starting at 0).
         y:{beginAtZero:false,grace:'8%',ticks:{callback:v=>{if(unit==='$')return'$'+(v>=1000?Math.round(v/1000)+'k':v);if(unit==='%')return v.toFixed(1)+'%';if(unit==='s')return tF(v);return v;}}}
       },
       layout:{padding:{top:28,right:8}}
-    },
-    plugins:[_valueLabelsPlugin(v=>tooltipFmt(v))]
-  });
+    };
+  }
+  CMP._chart=new Chart(canvas,{type:'line',data:chartData,options:chartOptions,plugins:[_valueLabelsPlugin(v=>tooltipFmt(v))]});
 }
 function cmpCloseChart(){
   const mod=document.getElementById('cmpChartModal');if(mod)mod.classList.remove('on');
@@ -3087,6 +3205,7 @@ function update(){
   if(dyC){dyC.style.opacity=isPeriod?'0.3':'1';dyC.style.pointerEvents=isPeriod?'none':'';}
   const d=getLData(),wk=APP.week,dy=isPeriod?'all':resDy(APP.day);
   updKPI(d,wk,dy);updSales(d,wk,dy);updLabor(d,wk,dy);updSOS(d,wk,dy);updCOGS(d,wk,dy);updRanks(wk);updOpsHub(wk,dy);
+  if(typeof renderWeekNoteBanner==='function')renderWeekNoteBanner();
   // Refresh compare panel selectors when data changes
   if(typeof updCompare==='function')updCompare();
   // refresh open config panels
@@ -4221,6 +4340,11 @@ function renderCfgSettings(){
       <button class="bp" style="margin-top:12px;width:100%" onclick="applyPRL()">Apply Labels</button>
     </div>
     <div class="sc">
+      <div class="sct">📌 Week Notes</div>
+      <p style="font-size:12px;color:var(--gtxt);margin-bottom:12px;line-height:1.6">Add a note for any week (holidays, store openings, weather events) — a banner will appear on the dashboard when that week is selected.</p>
+      ${_renderWeekNotesEditor()}
+    </div>
+    <div class="sc">
       <div class="sct">District Config</div>
       <p style="font-size:12px;color:var(--gtxt);margin-bottom:12px;line-height:1.6">Districts are auto-saved to your browser — they reload automatically next time. Use Export/Import to share district setups with a teammate.</p>
       <div class="eir">
@@ -4282,6 +4406,69 @@ function updSettings(){}
 function applyPRL(){
   document.querySelectorAll('#prlList input').forEach(el=>{const k=el.dataset.k,v=el.value.trim();if(v)APP.labels[k]=v;else delete APP.labels[k]});
   buildPerTabs();document.getElementById('hdrSub').textContent=Object.keys(APP.monthly).map(k=>APP.labels[k]||k).join(' · ')+' — Daily Reporting';autoSaveConfig();
+}
+
+// ── Week Notes — per-week annotations shown as a banner on the dashboard ──
+const WEEK_NOTES_KEY='angies_week_notes';
+function _loadWeekNotes(){
+  try{const s=localStorage.getItem(WEEK_NOTES_KEY);if(s){const o=JSON.parse(s);if(o&&typeof o==='object')return o;}}catch(e){}
+  return{};
+}
+function _saveWeekNotes(){try{localStorage.setItem(WEEK_NOTES_KEY,JSON.stringify(APP.weekNotes||{}));}catch(e){}}
+function _weekNoteKey(periodKey,wk){return`${periodKey}::${wk}`;}
+function _renderWeekNotesEditor(){
+  if(!APP.weekNotes)APP.weekNotes=_loadWeekNotes();
+  const periods=Object.keys(APP.monthly);
+  if(!periods.length)return '<p style="font-size:12px;color:var(--gtxt)"><em>Upload a report first — week notes appear here once data is loaded.</em></p>';
+  let html='<div style="display:flex;flex-direction:column;gap:14px">';
+  periods.forEach(periodKey=>{
+    const pd=APP.monthly[periodKey];
+    const wks=pd&&pd.weeks||[];
+    if(!wks.length)return;
+    html+=`<div><div style="font-size:11px;font-weight:700;color:var(--navy);margin-bottom:6px">${APP.labels[periodKey]||periodKey}</div>`;
+    wks.forEach(wk=>{
+      const k=_weekNoteKey(periodKey,wk);
+      const note=APP.weekNotes[k]||'';
+      const sd=pd.all&&pd.all[wk]?pd.all[wk].sd:'';
+      const wkLbl=wk.replace('Week ','Wk ')+(sd?' ('+sd+')':'');
+      html+=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+        <div style="min-width:120px;font-size:12px;color:var(--gtxt)">${wkLbl}</div>
+        <input type="text" data-wnk="${k}" value="${note.replace(/"/g,'&quot;')}" placeholder="(no note)" style="flex:1;padding:5px 8px;border:1px solid var(--bdr);border-radius:5px;font-size:12px" onchange="saveWeekNote(this.dataset.wnk,this.value)">
+      </div>`;
+    });
+    html+='</div>';
+  });
+  html+='</div>';
+  return html;
+}
+function saveWeekNote(key,val){
+  if(!APP.weekNotes)APP.weekNotes={};
+  const trimmed=(val||'').trim();
+  if(trimmed)APP.weekNotes[key]=trimmed;
+  else delete APP.weekNotes[key];
+  _saveWeekNotes();
+  // Refresh the dashboard banner in case the current week's note changed
+  if(typeof renderWeekNoteBanner==='function')renderWeekNoteBanner();
+}
+// Banner shown above the data area when the currently-selected week has a note
+function renderWeekNoteBanner(){
+  if(!APP.weekNotes)APP.weekNotes=_loadWeekNotes();
+  let banner=document.getElementById('weekNoteBanner');
+  const wk=APP.week;
+  const periodKey=APP.period;
+  const note=(wk&&wk!=='_period'&&periodKey)?APP.weekNotes[_weekNoteKey(periodKey,wk)]:null;
+  if(!note){if(banner)banner.style.display='none';return;}
+  if(!banner){
+    banner=document.createElement('div');
+    banner.id='weekNoteBanner';
+    banner.style.cssText='margin:10px 0;padding:10px 14px;background:linear-gradient(90deg,#fff7e6 0%,#fffaf0 100%);border-left:4px solid var(--gold);border-radius:6px;display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:13px;color:var(--navy)';
+    const target=document.querySelector('.cnt')||document.getElementById('dashContent');
+    if(target&&target.parentElement)target.parentElement.insertBefore(banner,target);
+    else document.body.appendChild(banner);
+  }
+  banner.innerHTML=`<div><span style="font-weight:700">📌 ${wk.replace('Week ','Wk ')} note:</span> ${note}</div>
+    <button onclick="this.parentElement.style.display='none'" style="background:transparent;border:0;color:var(--gtxt);font-size:18px;cursor:pointer;line-height:1;padding:0 4px" title="Dismiss for this session">×</button>`;
+  banner.style.display='flex';
 }
 function applyGoals(){
   autoSaveConfig();
