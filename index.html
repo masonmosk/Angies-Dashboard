@@ -748,9 +748,10 @@ const SHEET_ALIAS={'Rural':'Ray','Power':'PowerRay'};
 const PARSE_VER=21;
 const TBL_DATA={};
 const EXPORT_METRICS=[
-  // Sales
-  {k:'acS',  label:'Actual Sales',           cat:'Sales',    fmt:'$'},
+  // Metric order mirrors the Excel AllStores sheet so cross-platform reading is fluid.
+  // ── Sales (top of sheet) ──
   {k:'pjS',  label:'Projected Sales',         cat:'Sales',    fmt:'$'},
+  {k:'acS',  label:'Actual Sales',            cat:'Sales',    fmt:'$'},
   {k:'_sV',  label:'Sales Variance $',        cat:'Sales',    fmt:'$±'},
   {k:'_sVP', label:'Sales Variance %',        cat:'Sales',    fmt:'%±'},
   {k:'lob',  label:'Lobster Revenue',         cat:'Sales',    fmt:'$'},
@@ -758,44 +759,46 @@ const EXPORT_METRICS=[
   {k:'bur',  label:'Burger Revenue',          cat:'Sales',    fmt:'$'},
   {k:'chk',  label:'Chicken Revenue',         cat:'Sales',    fmt:'$'},
   {k:'bev',  label:'Beverage Revenue',        cat:'Sales',    fmt:'$'},
-  // Labor
-  {k:'aLP',  label:'Labor % (Excl Training)', cat:'Labor',    fmt:'%'},
+  // ── Labor – excl. Training section (Excel rows 27-46) ──
   {k:'pLP',  label:'Projected Labor %',       cat:'Labor',    fmt:'%'},
-  {k:'alLP', label:'All-In Labor %',          cat:'Labor',    fmt:'%'},
-  {k:'plLP', label:'Projected All-In Labor %',cat:'Labor',    fmt:'%'},
-  {k:'aSP',  label:'SPLH (Actual)',           cat:'Labor',    fmt:'$1'},
-  {k:'pSP',  label:'SPLH (Projected)',        cat:'Labor',    fmt:'$1'},
+  {k:'aLP',  label:'Labor % (Excl Training)', cat:'Labor',    fmt:'%'},
+  {k:'wgV',  label:'Wage % Variance',         cat:'Labor',    fmt:'%'},
+  {k:'lmH',  label:'Model Hours',             cat:'Labor',    fmt:'0'},
   {k:'scH',  label:'Scheduled Hours',         cat:'Labor',    fmt:'0'},
   {k:'acH',  label:'Actual Hours',            cat:'Labor',    fmt:'0'},
   {k:'_hV',  label:'Hours Variance',          cat:'Labor',    fmt:'0±'},
   {k:'idH',  label:'Ideal Hours',             cat:'Labor',    fmt:'0'},
-  {k:'lmH',  label:'Model Hours',             cat:'Labor',    fmt:'0'},
   {k:'needH',label:'Cut/Add Hours',           cat:'Labor',    fmt:'0±'},
+  {k:'pSP',  label:'SPLH (Projected)',        cat:'Labor',    fmt:'$1'},
+  {k:'aSP',  label:'SPLH (Actual)',           cat:'Labor',    fmt:'$1'},
+  // ── Labor – All In section (Excel rows 48-69) ──
+  {k:'plLP', label:'Projected All-In Labor %',cat:'Labor',    fmt:'%'},
+  {k:'alLP', label:'All-In Labor %',          cat:'Labor',    fmt:'%'},
+  {k:'regLP',label:'Regular Training %',      cat:'Labor',    fmt:'%'},
+  {k:'nsoLP',label:'NSO Training %',          cat:'Labor',    fmt:'%'},
+  // ── Training (Regular & NSO) section (Excel rows 71-74) ──
   {k:'scTrH',label:'Training Hours Scheduled',cat:'Labor',    fmt:'dec'},
   {k:'acTrH',label:'Training Hours Actual',   cat:'Labor',    fmt:'dec'},
   {k:'_trHV',label:'Training Hours Variance', cat:'Labor',    fmt:'dec±'},
-  {k:'nsoLP',label:'NSO Training %',          cat:'Labor',    fmt:'%'},
-  {k:'regLP',label:'Regular Training %',      cat:'Labor',    fmt:'%'},
-  {k:'wgV',  label:'Wage % Variance',         cat:'Labor',    fmt:'%'},
-  // Speed of Service
-  {k:'win',  label:'Window Time (All)',        cat:'SOS',      fmt:'time'},
-  {k:'winB', label:'Window Time Breakfast',     cat:'SOS',      fmt:'time'},
-  {k:'winL', label:'Window Time Lunch',        cat:'SOS',      fmt:'time'},
-  {k:'winD', label:'Window Time Dinner',       cat:'SOS',      fmt:'time'},
-  {k:'kio',  label:'Kiosk Time (All)',         cat:'SOS',      fmt:'time'},
-  {k:'kioB', label:'Kiosk Time Breakfast',      cat:'SOS',      fmt:'time'},
-  {k:'kioL', label:'Kiosk Time Lunch',         cat:'SOS',      fmt:'time'},
-  {k:'kioD', label:'Kiosk Time Dinner',        cat:'SOS',      fmt:'time'},
-  {k:'cars', label:'Total Cars',               cat:'SOS',      fmt:'0'},
-  // Accuracy
-  {k:'comp', label:'Accuracy Complaints',      cat:'Accuracy', fmt:'0'},
-  {k:'txns', label:'Transactions',             cat:'Accuracy', fmt:'0'},
-  {k:'_acc', label:'Accuracy / 1K',            cat:'Accuracy', fmt:'dec'},
-  // COGS
+  // ── COGS section (Excel rows 76-80) ──
   {k:'cgL',  label:'Lobster COGS Variance',    cat:'COGS',     fmt:'$'},
   {k:'cgC',  label:'Chicken COGS Variance',    cat:'COGS',     fmt:'$'},
   {k:'cgS',  label:'Steak COGS Variance',      cat:'COGS',     fmt:'$'},
   {k:'cgCh', label:'Cheese COGS Variance',     cat:'COGS',     fmt:'$'},
+  // ── Other Metrics section (Excel rows 88-96): Window, HME, Cars, Kiosk, Accuracy ──
+  {k:'win',  label:'Window Time (All)',        cat:'SOS',      fmt:'time'},
+  {k:'winB', label:'Window Time Breakfast',    cat:'SOS',      fmt:'time'},
+  {k:'winL', label:'Window Time Lunch',        cat:'SOS',      fmt:'time'},
+  {k:'winD', label:'Window Time Dinner',       cat:'SOS',      fmt:'time'},
+  {k:'cars', label:'Total Cars',               cat:'SOS',      fmt:'0'},
+  {k:'kio',  label:'Kiosk Time (All)',         cat:'SOS',      fmt:'time'},
+  {k:'kioB', label:'Kiosk Time Breakfast',     cat:'SOS',      fmt:'time'},
+  {k:'kioL', label:'Kiosk Time Lunch',         cat:'SOS',      fmt:'time'},
+  {k:'kioD', label:'Kiosk Time Dinner',        cat:'SOS',      fmt:'time'},
+  // ── Accuracy (end of Other Metrics) ──
+  {k:'comp', label:'Accuracy Complaints',      cat:'Accuracy', fmt:'0'},
+  {k:'txns', label:'Transactions',             cat:'Accuracy', fmt:'0'},
+  {k:'_acc', label:'Accuracy / 1K',            cat:'Accuracy', fmt:'dec'},
 ];
 const SN={Baseline:'Baseline & Hardy',Signal:'Signal Butte & Guadalupe',QC:'Gilbert & Queen Creek',Ray:'Ray & Rural',Pinnacle:'19th & Pinnacle Peak',Central:'Central & Thomas',LoneCactus:'Lone Cactus & 7th St',Tbird:'43rd & Thunderbird',Litchfield:'Litchfield & Waddell','83rd':'83rd & Glendale',Peoria:'35th & Peoria',Jackrabbit:'Jackrabbit & Indian School',Wilmot1:'Broadway & Wilmot',Alvernon:'Broadway & Alvernon',Wilmot2:'Broadway & Wilmot #2',Marketplace:'Park & Tucson Marketplace',Copper:'Copper & Campbell',Milton:'Milton & Riordan',BlueDiamond:'Blue Diamond & Decatur',Prescott:'Prescott Valley',Alma:'15th & Alma',PowerRay:'Power & Ray'};
 // Store numbers — auto-updated from the "Store List" sheet in each loaded workbook
@@ -2547,7 +2550,10 @@ function updCompare(){
   const aHdr=`A: ${_cmpLocLabel(CMP.A.loc)} — ${CMP.A.period||''} ${_cmpWeekLabel(CMP.A.week||'')}`;
   const bHdr=`B: ${_cmpLocLabel(CMP.B.loc)} — ${CMP.B.period||''} ${_cmpWeekLabel(CMP.B.week||'')}`;
   let html=`<thead><tr><th>Metric</th><th class="cmp-num" style="background:#c04020">${aHdr}</th><th class="cmp-num">${bHdr}</th><th class="cmp-num">Δ (A−B)</th><th class="cmp-num">Δ %</th></tr></thead><tbody>`;
-  const selMetrics=CMP.metrics.map(k=>EXPORT_METRICS.find(m=>m.k===k)).filter(Boolean);
+  // Iterate EXPORT_METRICS so the table follows Excel-sheet order regardless of
+  // when each metric was checked (CMP.metrics is just the selection set).
+  const _selSet=new Set(CMP.metrics);
+  const selMetrics=EXPORT_METRICS.filter(m=>_selSet.has(m.k));
   selMetrics.forEach(m=>{
     const vA=dA?_cmpCompute(dA,CMP.A.week,m.k):null;
     const vB=dB?_cmpCompute(dB,CMP.B.week,m.k):null;
