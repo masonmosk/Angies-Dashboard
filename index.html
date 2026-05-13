@@ -2947,7 +2947,9 @@ function _cmpRenderChart(){
       },
       scales:{
         x:{ticks:{font:{size:11},maxRotation:25,minRotation:0,autoSkip:false}},
-        y:{beginAtZero:true,ticks:{callback:v=>{if(unit==='$')return'$'+(v>=1000?Math.round(v/1000)+'k':v);if(unit==='%')return v.toFixed(1)+'%';if(unit==='s')return tF(v);return v;}}}
+        // Tight y-axis: auto-fit to the actual data range with a small grace
+        // pad so subtle changes are easier to see (vs always starting at 0).
+        y:{beginAtZero:false,grace:'8%',ticks:{callback:v=>{if(unit==='$')return'$'+(v>=1000?Math.round(v/1000)+'k':v);if(unit==='%')return v.toFixed(1)+'%';if(unit==='s')return tF(v);return v;}}}
       },
       layout:{padding:{top:28,right:8}}
     },
@@ -4600,9 +4602,16 @@ function _valueLabelsPlugin(formatter){
   };
 }
 function cOpts(px,smooth){
+  // Line charts (`smooth`) auto-fit their y-axis to the data range with a small
+  // grace pad so small variations are visible. Bar charts keep the 0 baseline so
+  // bar heights remain proportional and not visually misleading.
+  const ySpec=smooth
+    ?{beginAtZero:false,grace:'8%'}
+    :{beginAtZero:px!=='%'};
+  ySpec.ticks={callback:v=>{if(px==='$')return v>=1000000?'$'+(v/1000000).toFixed(1)+'M':v>=1000?'$'+Math.round(v/1000)+'k':'$'+v;if(px==='%')return v.toFixed(0)+'%';if(px==='s')return v+'s';return nF(v)}};
   return{responsive:true,maintainAspectRatio:false,
     plugins:{legend:{position:'top',labels:{font:{size:11},boxWidth:12,padding:10}},tooltip:{callbacks:{label:c=>{const v=c.raw;if(px==='$')return c.dataset.label+': '+$F(v);if(px==='%')return c.dataset.label+': '+v.toFixed(1)+'%';if(px==='s')return c.dataset.label+': '+tF(v)+' ('+Math.round(v)+'s)';return c.dataset.label+': '+nF(v)}}}},
-    scales:{y:{beginAtZero:px!=='%',ticks:{callback:v=>{if(px==='$')return v>=1000000?'$'+(v/1000000).toFixed(1)+'M':v>=1000?'$'+Math.round(v/1000)+'k':'$'+v;if(px==='%')return v.toFixed(0)+'%';if(px==='s')return v+'s';return nF(v)}}}}};
+    scales:{y:ySpec}};
 }
 function dstry(id){if(CH[id]){CH[id].destroy();CH[id]=null}}
 
