@@ -4486,23 +4486,45 @@ function _ensureWeekNoteBannerCSS(){
 function renderWeekNoteBanner(){
   if(!APP.weekNotes)APP.weekNotes=_loadWeekNotes();
   let banner=document.getElementById('weekNoteBanner');
-  const wk=APP.week;
   const periodKey=APP.period;
-  const note=(wk&&wk!=='_period'&&periodKey)?APP.weekNotes[_weekNoteKey(periodKey,wk)]:null;
-  if(!note){if(banner)banner.style.display='none';document.body.style.paddingTop='';return;}
+  // Collect every note attached to the currently selected period
+  const prefix=periodKey?(periodKey+'::'):null;
+  const entries=[];
+  if(prefix){
+    Object.keys(APP.weekNotes||{}).forEach(k=>{
+      if(k.indexOf(prefix)!==0)return;
+      const wk=k.slice(prefix.length);
+      const txt=(APP.weekNotes[k]||'').trim();
+      if(!txt)return;
+      // Sort numeric week first, then "_period" / strings
+      const n=parseInt(wk,10);
+      entries.push({wk,txt,sort:isNaN(n)?999:n});
+    });
+    entries.sort((a,b)=>a.sort-b.sort);
+  }
+  if(!entries.length){if(banner)banner.style.display='none';document.body.style.paddingTop='';return;}
   _ensureWeekNoteBannerCSS();
   if(!banner){
     banner=document.createElement('div');
     banner.id='weekNoteBanner';
     document.body.appendChild(banner);
   }
-  const wkLabel=(wk+'').replace(/^Week\s*/i,'Wk ');
   const esc=t=>(t+'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  // Duplicate the item so the marquee loops seamlessly (translateX -50%)
-  const item=`<span><strong>${esc(wkLabel)}</strong>${esc(note)}</span><span class="wnb-dot">◆</span>`;
+  const labelFor=wk=>{
+    if(wk==='_period')return 'Period';
+    const n=parseInt(wk,10);
+    return isNaN(n)?wk:('Wk '+n);
+  };
+  // Build the run of items once
+  const items=entries.map(e=>`<span><strong>${esc(labelFor(e.wk))}</strong>${esc(e.txt)}</span><span class="wnb-dot">◆</span>`).join('');
+  // Duplicate so the marquee loops seamlessly (translateX -50%)
+  // Scale the animation duration to total content length so longer feeds aren't too fast
+  const totalChars=entries.reduce((a,e)=>a+e.txt.length+8,0);
+  const duration=Math.max(20,Math.min(90,Math.round(totalChars/8)));
+  const countLabel=entries.length===1?'Week Note':(entries.length+' Notes');
   banner.innerHTML=`
-    <div class="wnb-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1Z"/></svg>Week Note</div>
-    <div class="wnb-track"><div class="wnb-marquee">${item}${item}${item}${item}</div></div>
+    <div class="wnb-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1Z"/></svg>${esc(countLabel)}</div>
+    <div class="wnb-track"><div class="wnb-marquee" style="animation-duration:${duration}s">${items}${items}</div></div>
     <button class="wnb-close" onclick="document.getElementById('weekNoteBanner').style.display='none';document.body.style.paddingTop='';" title="Dismiss">×</button>
   `;
   banner.style.display='flex';
