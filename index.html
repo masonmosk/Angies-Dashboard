@@ -2693,6 +2693,9 @@ function cmpQuickPick(n){
   });
   const picked=(seeded.length>=n?seeded:all).slice(0,n);
   if(!picked.length){showToast('No loaded weeks to populate.',3000);return;}
+  // Reverse so the OLDEST week is column #1 (left) and MOST RECENT is rightmost.
+  // This way the trend line reads naturally left→right as time progresses.
+  picked.reverse();
   CMP.selections=picked.map(x=>({id:_cmpNewId(),period:x.period,week:x.week}));
   _cmpSaveSelections();_cmpRenderSelections();updCompare();_cmpReRenderChartIfOpen();
   // Reset the dropdown so the user can re-pick the same option later
@@ -2875,23 +2878,33 @@ function _cmpExpandColumns(){
         cols.push({
           selId:sel.id,selIdx:idx,accent,period:sel.period,week:sel.week,
           locs:[loc],
-          header:_cmpHeaderLabel(sel,[loc],idx)
+          header:_cmpHeaderLabel(sel,[loc],idx,true) // show store since stores differ per column
         });
       });
     } else {
       cols.push({
         selId:sel.id,selIdx:idx,accent,period:sel.period,week:sel.week,
         locs:globalLocs.slice(),
-        header:_cmpHeaderLabel(sel,globalLocs,idx)
+        header:_cmpHeaderLabel(sel,globalLocs,idx,false) // hide store — it's shared across all columns
       });
     }
   });
   return cols;
 }
-function _cmpHeaderLabel(sel,locs,idx){
-  const locLbl=locs.length===1?_cmpLocLabel(locs[0]):locs.length+' stores';
-  const wk=_cmpWeekLabel(sel.week||'');
-  return`#${idx+1} · ${locLbl} · ${sel.period||''} ${wk}`;
+// Short column header: "#1 · P5 W1 FY26" (no store when shared); when stores
+// are split out per column, append the short store name.
+function _cmpHeaderLabel(sel,locs,idx,showLocs){
+  const periodStr=String(sel.period||'');
+  // "Period 5 FY26" → "P5 FY26";  "Period 12" → "P12"
+  const fyMatch=periodStr.match(/(FY\d+)/i);
+  const pNumMatch=periodStr.match(/Period\s+(\d+)/i);
+  const shortP=pNumMatch?'P'+pNumMatch[1]:periodStr;
+  // "Week 5" → "W5";  "_period" → "Period"
+  const shortW=sel.week==='_period'?'Period':String(sel.week||'').replace(/^Week\s+(\d+)/i,'W$1');
+  const head=fyMatch?`${shortP} ${shortW} ${fyMatch[1]}`:`${shortP} ${shortW}`;
+  let label=`#${idx+1} · ${head}`;
+  if(showLocs&&locs&&locs.length===1)label+=` · ${_cmpLocLabel(locs[0])}`;
+  return label;
 }
 function _cmpColValue(col,mk){
   const d=_cmpAggregateLocs(col.period,col.locs);
