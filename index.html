@@ -182,9 +182,6 @@ input[type=file]{display:none}
 .cmp-delta-neu{color:var(--gtxt)}
 .cmp-metric-label{color:var(--navy);font-weight:600}
 .cmp-metric-cat{color:var(--gtxt);font-size:9px;text-transform:uppercase;letter-spacing:.3px;margin-right:6px;padding:1px 5px;background:#eef1f7;border-radius:3px;display:inline-block;min-width:46px;text-align:center;vertical-align:middle}
-.cmp-cell-best{background:rgba(39,174,96,.15)!important;color:#1a6a35;font-weight:700}
-.cmp-cell-worst{background:rgba(232,67,42,.15)!important;color:#b81e08;font-weight:700}
-.cmp-cell-mid{color:var(--navy)}
 /* Global stores selector bar */
 .cmp-stores-bar{display:flex;align-items:center;gap:14px;background:#f0f4ff;border:1px solid #d1d9eb;border-radius:10px;padding:10px 14px;margin-bottom:12px;flex-wrap:wrap}
 .cmp-stores-label{font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--navy);flex-shrink:0}
@@ -2682,16 +2679,26 @@ function _cmpAllWeeksChronological(){
   return out.sort((a,b)=>b.epoch-a.epoch); // descending: most recent first
 }
 
-// Replace the comparison selections with the most-recent N weeks
+// Replace the comparison selections with the most-recent N FULLY COMPLETED weeks
 function cmpQuickPick(n){
   if(!n||n<=0)return;
   const all=_cmpAllWeeksChronological();
-  // Skip any weeks that are entirely future (no sales data yet)
+  const today=Date.now();
+  // A week is "full" when its start date is at least 7 days ago (week has ended).
+  // Skip current/partial weeks so the user gets clean comparisons.
+  const fullWeeks=all.filter(x=>{
+    const pd=APP.monthly[x.period];
+    if(!pd||!pd.all||!pd.all[x.week]||!pd.all[x.week].m||!pd.all[x.week].m.acS||pd.all[x.week].m.acS.w<=0)return false;
+    const daysSinceStart=(today-x.epoch)/86400000;
+    return daysSinceStart>=7;
+  });
+  // Fall back to non-empty weeks (incl. partials) only if there aren't enough full ones
   const seeded=all.filter(x=>{
     const pd=APP.monthly[x.period];
     return pd&&pd.all&&pd.all[x.week]&&pd.all[x.week].m&&pd.all[x.week].m.acS&&pd.all[x.week].m.acS.w>0;
   });
-  const picked=(seeded.length>=n?seeded:all).slice(0,n);
+  const source=fullWeeks.length>=n?fullWeeks:(seeded.length>=n?seeded:all);
+  const picked=source.slice(0,n);
   if(!picked.length){showToast('No loaded weeks to populate.',3000);return;}
   // Reverse so the OLDEST week is column #1 (left) and MOST RECENT is rightmost.
   // This way the trend line reads naturally left→right as time progresses.
@@ -2700,7 +2707,7 @@ function cmpQuickPick(n){
   _cmpSaveSelections();_cmpRenderSelections();updCompare();_cmpReRenderChartIfOpen();
   // Reset the dropdown so the user can re-pick the same option later
   const sel=document.getElementById('cmpQuickWeeks');if(sel)sel.value='0';
-  showToast(`Loaded the last <strong>${picked.length}</strong> week${picked.length>1?'s':''} into the comparison.`,3000);
+  showToast(`Loaded the last <strong>${picked.length}</strong> full week${picked.length>1?'s':''} into the comparison.`,3000);
 }
 
 // ── Metric picker (unchanged) ──
@@ -2942,14 +2949,6 @@ function updCompare(){
   selMetrics.forEach(m=>{
     const vals=cols.map(c=>_cmpColValue(c,m.k));
     const lowerBetter=_CMP_LOWER_BETTER.has(m.k);
-    // Compute best/worst across this row's values (excluding null/zero)
-    const valid=vals.filter(v=>v!=null&&v!==0);
-    let best=null,worst=null;
-    if(valid.length>=2){
-      best=lowerBetter?Math.min(...valid):Math.max(...valid);
-      worst=lowerBetter?Math.max(...valid):Math.min(...valid);
-      if(best===worst){best=null;worst=null;} // all equal — skip coloring
-    }
     // Delta vs first column (only used when 2 cols)
     const v1=vals[0],vLast=vals[vals.length-1];
     const delta=showDelta&&v1!=null&&vLast!=null?(vLast-v1):null;
@@ -2959,14 +2958,7 @@ function updCompare(){
     const pctStr=pctDelta==null?'-':(pctDelta>=0?'+':'')+pctDelta.toFixed(1)+'%';
     let row=`<tr data-mk="${m.k}" onclick="cmpOpenChart('${m.k}')" title="Click for chart">
       <td><span class="cmp-metric-cat">${m.cat}</span><span class="cmp-metric-label">${m.label}</span></td>`;
-    vals.forEach(v=>{
-      let cellCls='cmp-num';
-      if(!showDelta&&v!=null&&v!==0){
-        if(v===best)cellCls+=' cmp-cell-best';
-        else if(v===worst)cellCls+=' cmp-cell-worst';
-      }
-      row+=`<td class="${cellCls}">${v==null?'-':_cmpFmt(v,m.fmt)}</td>`;
-    });
+    vals.forEach(v=>{row+=`<td class="cmp-num">${v==null?'-':_cmpFmt(v,m.fmt)}</td>`;});
     if(showDelta)row+=`<td class="cmp-num ${dCls}">${dStr}</td><td class="cmp-num ${dCls}">${pctStr}</td>`;
     row+='</tr>';
     html+=row;
