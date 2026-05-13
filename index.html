@@ -182,9 +182,13 @@ input[type=file]{display:none}
 .cmp-delta-neu{color:var(--gtxt)}
 .cmp-metric-label{color:var(--navy);font-weight:600}
 .cmp-metric-cat{color:var(--gtxt);font-size:10px;text-transform:uppercase;letter-spacing:.4px;margin-right:8px;padding:2px 6px;background:#eef1f7;border-radius:4px;display:inline-block;min-width:54px;text-align:center}
+/* Global stores selector bar */
+.cmp-stores-bar{display:flex;align-items:center;gap:14px;background:#f0f4ff;border:1px solid #d1d9eb;border-radius:10px;padding:10px 14px;margin-bottom:12px;flex-wrap:wrap}
+.cmp-stores-label{font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--navy);flex-shrink:0}
+.cmp-stores-picker-wrap{position:relative;flex:1;min-width:240px;max-width:480px}
 /* Selection rows (multi-comparison support) */
-.cmp-row{display:grid;grid-template-columns:18px 36px 160px 150px 1fr auto auto;gap:10px;align-items:center;background:var(--wh);border:1px solid var(--bdr);border-radius:10px;padding:10px 12px;margin-bottom:8px;border-left-width:4px;border-left-style:solid;position:relative;transition:transform .12s,opacity .12s,box-shadow .12s}
-@media(max-width:900px){.cmp-row{grid-template-columns:18px 36px 1fr 1fr;gap:8px}.cmp-row .cmp-row-sep,.cmp-row .cmp-row-remove{grid-column:span 1}}
+.cmp-row{display:grid;grid-template-columns:18px 36px 1fr 1fr auto;gap:10px;align-items:center;background:var(--wh);border:1px solid var(--bdr);border-radius:10px;padding:10px 12px;margin-bottom:8px;border-left-width:4px;border-left-style:solid;position:relative;transition:transform .12s,opacity .12s,box-shadow .12s}
+@media(max-width:900px){.cmp-row{grid-template-columns:18px 36px 1fr 1fr auto;gap:8px}}
 .cmp-row-handle{color:var(--gtxt);font-size:14px;line-height:1;letter-spacing:-2px;cursor:grab;text-align:center;user-select:none;padding:4px 0}
 .cmp-row-handle:active{cursor:grabbing}
 .cmp-row-dragging{opacity:.4;box-shadow:0 8px 22px rgba(0,0,0,.15)}
@@ -747,6 +751,20 @@ input[type=file]{display:none}
           <button class="bp" onclick="cmpSelectAll(true)">Select all metrics</button>
           <button class="bp" onclick="cmpSelectAll(false)">Clear all</button>
         </div>
+      </div>
+      <!-- Global stores selector — applies to ALL comparison rows below -->
+      <div class="cmp-stores-bar">
+        <div class="cmp-stores-label">Stores to compare:</div>
+        <div class="cmp-stores-picker-wrap">
+          <button class="cmp-loc-btn" onclick="cmpToggleGlobalLocPicker(event)" type="button" id="cmpGlobalLocBtn">
+            <span id="cmpGlobalLocLabel">All Stores</span><span class="cmp-loc-caret">▼</span>
+          </button>
+          <div class="cmp-loc-picker" id="cmpGlobalLocPicker"></div>
+        </div>
+        <label class="cmp-row-sep" title="Split each comparison row into a column per store. Only applies when multiple stores or a district is selected.">
+          <input type="checkbox" id="cmpGlobalSeparate" onchange="cmpUpdGlobalSeparate(this.checked)">
+          Show stores separately
+        </label>
       </div>
       <div id="cmpSelectionsList"></div>
       <details class="cmp-metrics-wrap" open>
@@ -2395,10 +2413,13 @@ function goTabWithLoc(s,locKey){
 // ══════════════════════════════════════════════════════════════════════════
 const CMP_METRICS_KEY='angies_cmp_metrics';
 const CMP_SELS_KEY='angies_cmp_selections';
+const CMP_GLOBAL_KEY='angies_cmp_global';
 const CMP_DEFAULT=['acS','_sVP','aLP','alLP','aSP','_hV','cars','_acc','cgL','cgC','cgS','cgCh'];
 // Distinct colors for selection accents (recycle if >8)
 const CMP_COLORS=['#E8432A','#1B2A4A','#D4A843','#27AE60','#7a3d00','#4a2470','#1a6040','#c04020'];
-const CMP={selections:[],metrics:null,_initialized:false,_uid:0,_chart:null,_lastRows:null};
+// Global: locs and separate apply to ALL selection rows (shared store basis)
+// Per-row: selections only hold period + week
+const CMP={selections:[],metrics:null,locs:['AllStores'],separate:false,_initialized:false,_uid:0,_chart:null,_lastRows:null};
 
 function _cmpNewId(){return 'sel'+(++CMP._uid)+'_'+Math.random().toString(36).slice(2,6);}
 function _cmpLoadMetrics(){
@@ -2407,8 +2428,13 @@ function _cmpLoadMetrics(){
 }
 function _cmpSaveMetrics(){try{localStorage.setItem(CMP_METRICS_KEY,JSON.stringify(CMP.metrics));}catch(e){}}
 function _cmpSaveSelections(){try{localStorage.setItem(CMP_SELS_KEY,JSON.stringify(CMP.selections));}catch(e){}}
+function _cmpSaveGlobal(){try{localStorage.setItem(CMP_GLOBAL_KEY,JSON.stringify({locs:CMP.locs,separate:CMP.separate}));}catch(e){}}
 function _cmpLoadSelections(){
-  try{const s=localStorage.getItem(CMP_SELS_KEY);if(s){const a=JSON.parse(s);if(Array.isArray(a)&&a.length){return a.map(x=>({id:x.id||_cmpNewId(),period:x.period||null,week:x.week||null,locs:Array.isArray(x.locs)&&x.locs.length?x.locs:['AllStores'],separate:!!x.separate}));}}}catch(e){}
+  try{const s=localStorage.getItem(CMP_SELS_KEY);if(s){const a=JSON.parse(s);if(Array.isArray(a)&&a.length){return a.map(x=>({id:x.id||_cmpNewId(),period:x.period||null,week:x.week||null}));}}}catch(e){}
+  return null;
+}
+function _cmpLoadGlobal(){
+  try{const s=localStorage.getItem(CMP_GLOBAL_KEY);if(s){const o=JSON.parse(s);if(o&&Array.isArray(o.locs)&&o.locs.length)return{locs:o.locs,separate:!!o.separate};}}catch(e){}
   return null;
 }
 
@@ -2462,10 +2488,6 @@ function _cmpRenderSelectionRow(sel,idx){
   const periodOpts=Object.keys(APP.monthly).map(k=>`<option value="${k}" ${k===sel.period?'selected':''}>${k}</option>`).join('');
   const weekOpts=['<option value="_period" '+(sel.week==='_period'?'selected':'')+'>⊞ Period Summary</option>']
     .concat(wks.map(w=>{const sd=pd&&pd.all&&pd.all[w]?pd.all[w].sd:'';return`<option value="${w}" ${w===sel.week?'selected':''}>${w.replace('Week ','Wk ')}${sd?' ('+sd+')':''}</option>`;})).join('');
-  const locLabel=_cmpLocsLabel(sel.locs);
-  // "Show separately" is meaningful when multiple stores/districts/AllStores are mixed
-  // OR a single district is picked (which expands to its constituent stores).
-  // Always enable so users can click freely; expand logic gracefully handles single-loc case.
   return `<div class="cmp-row" data-id="${sel.id}" style="border-left-color:${color}" draggable="true"
       ondragstart="cmpDragStart(event,'${sel.id}')"
       ondragover="cmpDragOver(event)"
@@ -2476,18 +2498,61 @@ function _cmpRenderSelectionRow(sel,idx){
     <div class="cmp-row-num" style="background:${color}">#${idx+1}</div>
     <select onchange="cmpUpdSel('${sel.id}','period',this.value)">${periodOpts}</select>
     <select onchange="cmpUpdSel('${sel.id}','week',this.value)">${weekOpts}</select>
-    <div class="cmp-row-locs">
-      <button class="cmp-loc-btn" onclick="cmpToggleLocPicker('${sel.id}',event)" type="button">
-        <span>${locLabel}</span><span class="cmp-loc-caret">▼</span>
-      </button>
-      <div class="cmp-loc-picker" id="locp_${sel.id}">${_cmpLocPickerHTML(sel)}</div>
-    </div>
-    <label class="cmp-row-sep" title="Split this row into a column per store. Only applies when multiple stores or a district is selected.">
-      <input type="checkbox" ${sel.separate?'checked':''} onchange="cmpUpdSel('${sel.id}','separate',this.checked)">
-      Show separately
-    </label>
     <button class="cmp-row-remove" onclick="cmpRemoveSelection('${sel.id}')" title="Remove this comparison" type="button">×</button>
   </div>`;
+}
+
+// ── Global stores picker (shared across all comparison rows) ──
+function _cmpRenderGlobalLoc(){
+  const lblEl=document.getElementById('cmpGlobalLocLabel');if(!lblEl)return;
+  lblEl.textContent=_cmpLocsLabel(CMP.locs);
+  const sepEl=document.getElementById('cmpGlobalSeparate');if(sepEl)sepEl.checked=!!CMP.separate;
+  // Build the picker HTML once per period set (cheap to rebuild on each call)
+  const picker=document.getElementById('cmpGlobalLocPicker');if(!picker)return;
+  const wasOpen=picker.classList.contains('on');
+  picker.innerHTML=_cmpGlobalLocPickerHTML();
+  if(wasOpen)picker.classList.add('on');
+}
+function _cmpGlobalLocPickerHTML(){
+  const selSet=new Set(CMP.locs||[]);
+  // Aggregate which stores are available across ALL loaded periods
+  const allStoreKeys=new Set();
+  Object.values(APP.monthly).forEach(pd=>{if(pd&&pd.stores)Object.keys(pd.stores).forEach(s=>allStoreKeys.add(s));});
+  let html='';
+  html+=`<label><input type="checkbox" ${selSet.has('AllStores')?'checked':''} onchange="cmpToggleGlobalLoc('AllStores',this.checked)"> All Stores</label>`;
+  if(APP.districts.length){
+    html+='<div class="cmp-loc-grp">Districts</div>';
+    APP.districts.forEach(d=>{
+      html+=`<label><input type="checkbox" ${selSet.has(d.id)?'checked':''} onchange="cmpToggleGlobalLoc('${d.id}',this.checked)"> 📍 ${d.name}</label>`;
+    });
+  }
+  html+='<div class="cmp-loc-grp">Individual Stores</div>';
+  SS.forEach(s=>{
+    if(allStoreKeys.has(s)){
+      const lbl=(STNUM[s]?STNUM[s]+' ':'')+(SN[s]||s);
+      html+=`<label><input type="checkbox" ${selSet.has(s)?'checked':''} onchange="cmpToggleGlobalLoc('${s}',this.checked)"> ${lbl}</label>`;
+    }
+  });
+  return html;
+}
+function cmpToggleGlobalLocPicker(ev){
+  if(ev)ev.stopPropagation();
+  // Close any per-row pickers (legacy) and toggle global
+  document.querySelectorAll('.cmp-loc-picker').forEach(p=>{if(p.id!=='cmpGlobalLocPicker')p.classList.remove('on');});
+  const p=document.getElementById('cmpGlobalLocPicker');if(p)p.classList.toggle('on');
+}
+function cmpToggleGlobalLoc(loc,checked){
+  if(checked){if(!CMP.locs.includes(loc))CMP.locs.push(loc);}
+  else{CMP.locs=CMP.locs.filter(l=>l!==loc);}
+  if(!CMP.locs.length)CMP.locs=['AllStores']; // never empty
+  _cmpSaveGlobal();
+  // Update only the label (don't rebuild the picker so it stays open)
+  const lblEl=document.getElementById('cmpGlobalLocLabel');if(lblEl)lblEl.textContent=_cmpLocsLabel(CMP.locs);
+  updCompare();_cmpReRenderChartIfOpen();
+}
+function cmpUpdGlobalSeparate(checked){
+  CMP.separate=!!checked;_cmpSaveGlobal();
+  updCompare();_cmpReRenderChartIfOpen();
 }
 
 // ── Drag-to-reorder selection rows ──
@@ -2541,35 +2606,9 @@ function _cmpLocsLabel(locs){
   if(names.length<=3)return names.join(', ');
   return names.length+' selected';
 }
-function _cmpLocPickerHTML(sel){
-  const selSet=new Set(sel.locs||[]);
-  const pd=APP.monthly[sel.period];
-  let html='';
-  // All Stores
-  html+=`<label><input type="checkbox" ${selSet.has('AllStores')?'checked':''} onchange="cmpToggleLoc('${sel.id}','AllStores',this.checked)"> All Stores</label>`;
-  if(APP.districts.length){
-    html+='<div class="cmp-loc-grp">Districts</div>';
-    APP.districts.forEach(d=>{
-      html+=`<label><input type="checkbox" ${selSet.has(d.id)?'checked':''} onchange="cmpToggleLoc('${sel.id}','${d.id}',this.checked)"> 📍 ${d.name}</label>`;
-    });
-  }
-  html+='<div class="cmp-loc-grp">Individual Stores</div>';
-  SS.forEach(s=>{
-    if(pd&&pd.stores&&pd.stores[s]){
-      const lbl=(STNUM[s]?STNUM[s]+' ':'')+(SN[s]||s);
-      html+=`<label><input type="checkbox" ${selSet.has(s)?'checked':''} onchange="cmpToggleLoc('${sel.id}','${s}',this.checked)"> ${lbl}</label>`;
-    }
-  });
-  return html;
-}
-function cmpToggleLocPicker(id,ev){
-  if(ev)ev.stopPropagation();
-  document.querySelectorAll('.cmp-loc-picker').forEach(p=>{if(p.id!=='locp_'+id)p.classList.remove('on');});
-  const p=document.getElementById('locp_'+id);if(p)p.classList.toggle('on');
-}
-// Close pickers when clicking outside
+// Close pickers when clicking outside (but stay open while clicking checkboxes inside)
 document.addEventListener('click',e=>{
-  if(!e.target.closest('.cmp-row-locs')){
+  if(!e.target.closest('.cmp-row-locs')&&!e.target.closest('.cmp-stores-picker-wrap')){
     document.querySelectorAll('.cmp-loc-picker.on').forEach(p=>p.classList.remove('on'));
   }
 });
@@ -2578,23 +2617,13 @@ function _cmpReRenderChartIfOpen(){
   const mod=document.getElementById('cmpChartModal');
   if(mod&&mod.classList.contains('on')&&CMP._chartMetric)_cmpRenderChart();
 }
-function cmpToggleLoc(id,loc,checked){
-  const sel=CMP.selections.find(s=>s.id===id);if(!sel)return;
-  if(checked){if(!sel.locs.includes(loc))sel.locs.push(loc);}
-  else{sel.locs=sel.locs.filter(l=>l!==loc);}
-  if(!sel.locs.length)sel.locs=['AllStores']; // never empty
-  _cmpSaveSelections();_cmpRenderSelections();updCompare();_cmpReRenderChartIfOpen();
-}
 function cmpUpdSel(id,field,val){
   const sel=CMP.selections.find(s=>s.id===id);if(!sel)return;
   sel[field]=val;
   if(field==='period'){
-    // When period changes, validate locs against new period's available stores
+    // When period changes, ensure week is valid for the new period
     const pd=APP.monthly[val];
     if(pd){
-      sel.locs=sel.locs.filter(l=>l==='AllStores'||APP.districts.find(d=>d.id===l)||(pd.stores&&pd.stores[l]));
-      if(!sel.locs.length)sel.locs=['AllStores'];
-      // Reset week if invalid
       const wks=['_period',...(pd.weeks||[])];
       if(!wks.includes(sel.week))sel.week='_period';
     }
@@ -2603,18 +2632,17 @@ function cmpUpdSel(id,field,val){
   _cmpSaveSelections();updCompare();_cmpReRenderChartIfOpen();
 }
 function cmpAddSelection(){
-  // Copy the last selection's settings as a starting point
+  // Copy the last selection's period and roll back to the previous week as a starting point
   const last=CMP.selections[CMP.selections.length-1];
   const periodKey=last?last.period:APP.period;
   const pd=APP.monthly[periodKey];
   const wks=pd?(pd.weeks||[]):[];
-  // Default the new selection to "previous week" if possible
   let wk=last?last.week:(APP.week||'_period');
   if(last&&last.week&&wks.length){
     const idx=wks.indexOf(last.week);
     if(idx>0)wk=wks[idx-1];
   }
-  CMP.selections.push({id:_cmpNewId(),period:periodKey,week:wk,locs:last?last.locs.slice():['AllStores'],separate:!!(last&&last.separate)});
+  CMP.selections.push({id:_cmpNewId(),period:periodKey,week:wk});
   _cmpSaveSelections();_cmpRenderSelections();updCompare();_cmpReRenderChartIfOpen();
 }
 function cmpRemoveSelection(id){
@@ -2665,29 +2693,53 @@ function cmpSelectAll(on){
 // ── Initialize ──
 function initCompare(){
   if(!Object.keys(APP.monthly).length)return;
-  // Migrate legacy {A,B} state if present
+  // Load global stores/separate state
+  const gl=_cmpLoadGlobal();
+  if(gl){CMP.locs=gl.locs;CMP.separate=gl.separate;}
+  else {CMP.locs=[APP.loc||'AllStores'];CMP.separate=false;}
+  // Load per-row selections (may also need legacy migration from when stores/separate
+  // were per-row)
   let loaded=_cmpLoadSelections();
   if(!loaded){
-    // Try legacy migration
+    // Legacy: try the v1 angies_cmp_selections shape (which had locs/separate per row)
+    // and pull the first row's locs/separate as the global defaults
+    try{
+      const s=localStorage.getItem(CMP_SELS_KEY);
+      if(s){
+        const arr=JSON.parse(s);
+        if(Array.isArray(arr)&&arr.length){
+          if(!gl&&arr[0].locs)CMP.locs=arr[0].locs;
+          if(!gl&&arr[0].separate)CMP.separate=arr[0].separate;
+          loaded=arr.map(x=>({id:x.id||_cmpNewId(),period:x.period||null,week:x.week||null}));
+          if(!gl)_cmpSaveGlobal();
+        }
+      }
+    }catch(e){}
+  }
+  if(!loaded){
+    // Legacy {A,B} migration
     try{
       const legacy=localStorage.getItem('angies_cmp');
       if(legacy){
         const obj=JSON.parse(legacy);
-        if(obj&&obj.A&&obj.B)loaded=[{id:_cmpNewId(),period:obj.A.period,week:obj.A.week,locs:[obj.A.loc||'AllStores'],separate:false},
-                                    {id:_cmpNewId(),period:obj.B.period,week:obj.B.week,locs:[obj.B.loc||'AllStores'],separate:false}];
+        if(obj&&obj.A&&obj.B){
+          if(!gl){CMP.locs=[obj.A.loc||'AllStores'];CMP.separate=false;_cmpSaveGlobal();}
+          loaded=[{id:_cmpNewId(),period:obj.A.period,week:obj.A.week},
+                  {id:_cmpNewId(),period:obj.B.period,week:obj.B.week}];
+        }
       }
     }catch(e){}
   }
   if(loaded&&loaded.length){
     CMP.selections=loaded;
   } else {
-    // Default: A = current view, B = previous week
-    const a={id:_cmpNewId(),period:APP.period,week:APP.week||'_period',locs:[APP.loc||'AllStores'],separate:false};
-    const pd=APP.monthly[a.period];const wks=pd?(pd.weeks||[]):[];
-    const idx=wks.indexOf(a.week);
+    // Default: 2 rows — current view + previous week
+    const period=APP.period;
+    const pd=APP.monthly[period];const wks=pd?(pd.weeks||[]):[];
+    const aWk=APP.week||'_period';
+    const idx=wks.indexOf(aWk);
     const bWk=idx>0?wks[idx-1]:(wks[0]||'_period');
-    const b={id:_cmpNewId(),period:a.period,week:bWk,locs:[a.locs[0]],separate:false};
-    CMP.selections=[a,b];
+    CMP.selections=[{id:_cmpNewId(),period,week:aWk},{id:_cmpNewId(),period,week:bWk}];
   }
   // Validate periods/weeks still exist
   CMP.selections.forEach(s=>{
@@ -2695,8 +2747,14 @@ function initCompare(){
     const pd=APP.monthly[s.period];const wks=['_period',...(pd?pd.weeks||[]:[])];
     if(!wks.includes(s.week))s.week='_period';
   });
+  // Validate global locs still exist (drop missing ones; default to AllStores if empty)
+  const anyStores=new Set();
+  Object.values(APP.monthly).forEach(pd=>{if(pd&&pd.stores)Object.keys(pd.stores).forEach(s=>anyStores.add(s));});
+  CMP.locs=CMP.locs.filter(l=>l==='AllStores'||APP.districts.find(d=>d.id===l)||anyStores.has(l));
+  if(!CMP.locs.length)CMP.locs=['AllStores'];
   if(!CMP.metrics)CMP.metrics=_cmpLoadMetrics();
   _cmpRenderSelections();
+  _cmpRenderGlobalLoc();
   _cmpBuildMetricsBox();
   CMP._initialized=true;
 }
@@ -2752,15 +2810,18 @@ function _cmpLocLabel(locKey){
 }
 function _cmpWeekLabel(wk){return wk==='_period'?'Period Summary':wk;}
 
-// Expand selections into a flat list of columns. Each "column" is what shows in the table.
-// A selection with separate=false produces 1 column (aggregated across its locs).
-// A selection with separate=true produces N columns, one per individual location.
+// Expand selections × global stores into a flat list of columns.
+// Stores are shared across all selection rows (CMP.locs).
+// CMP.separate=false → each row produces 1 column (aggregated across CMP.locs)
+// CMP.separate=true  → each row produces N columns, one per individual location
 function _cmpExpandColumns(){
   const cols=[];
+  const globalLocs=(CMP.locs&&CMP.locs.length)?CMP.locs:['AllStores'];
+  const separate=!!CMP.separate&&globalLocs.length>1;
   CMP.selections.forEach((sel,idx)=>{
     const accent=CMP_COLORS[idx%CMP_COLORS.length];
-    if(sel.separate&&sel.locs.length>1){
-      sel.locs.forEach(loc=>{
+    if(separate){
+      globalLocs.forEach(loc=>{
         cols.push({
           selId:sel.id,selIdx:idx,accent,period:sel.period,week:sel.week,
           locs:[loc],
@@ -2770,8 +2831,8 @@ function _cmpExpandColumns(){
     } else {
       cols.push({
         selId:sel.id,selIdx:idx,accent,period:sel.period,week:sel.week,
-        locs:sel.locs.slice(),
-        header:_cmpHeaderLabel(sel,sel.locs,idx)
+        locs:globalLocs.slice(),
+        header:_cmpHeaderLabel(sel,globalLocs,idx)
       });
     }
   });
