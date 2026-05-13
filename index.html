@@ -587,6 +587,7 @@ input[type=file]{display:none}
     <span class="cfg-bar-lbl">Configure</span>
     <button class="cfg-btn" id="cfgDistBtn" onclick="toggleCfg('dist')">📍 Districts</button>
     <button class="cfg-btn" id="cfgSetBtn" onclick="toggleCfg('settings')">⚙ Settings</button>
+    <button class="cfg-btn" id="cfgValuesBtn" onclick="toggleChartValues()" title="Show or hide inline value labels on line charts">📊 Values</button>
   </div>
   <div class="cfg-panel" id="cfg-dist"><!-- Districts panel inserted by JS --></div>
   <div class="cfg-panel" id="cfg-settings"><!-- Settings panel inserted by JS --></div>
@@ -810,7 +811,22 @@ input[type=file]{display:none}
 </div>
 
 <script>
-const APP={monthly:{},labels:{},districts:[],period:null,week:null,day:'all',loc:'AllStores',sosSub:'win',sosLd:{win:'all',kio:'all'},goals:{labor:24,salesVar:-5,sos:120,acc:1.0},_expMetrics:null,tblSort:{},autoExport:{enabled:false,profiles:[]},_ohSub:0,_scSk:null};
+const APP={monthly:{},labels:{},districts:[],period:null,week:null,day:'all',loc:'AllStores',sosSub:'win',sosLd:{win:'all',kio:'all'},goals:{labor:24,salesVar:-5,sos:120,acc:1.0},_expMetrics:null,tblSort:{},autoExport:{enabled:false,profiles:[]},_ohSub:0,_scSk:null,showChartLabels:(function(){try{const v=localStorage.getItem('angies_show_chart_labels');return v===null?true:v==='1';}catch(e){return true;}})()};
+function toggleChartValues(){
+  APP.showChartLabels=!APP.showChartLabels;
+  try{localStorage.setItem('angies_show_chart_labels',APP.showChartLabels?'1':'0');}catch(e){}
+  _refreshChartValuesUI();
+  // Redraw all live charts so the plugin gate is re-evaluated
+  try{if(window.CH)Object.values(CH).forEach(c=>{if(c&&c.update)c.update('none');});}catch(e){}
+  try{if(window.CMP&&CMP._chart&&CMP._chart.update)CMP._chart.update('none');}catch(e){}
+}
+function _refreshChartValuesUI(){
+  const btn=document.getElementById('cfgValuesBtn');if(!btn)return;
+  const on=APP.showChartLabels!==false;
+  btn.classList.toggle('on',on);
+  btn.textContent=on?'📊 Values':'📊 Values: off';
+  btn.style.opacity=on?'':'0.7';
+}
 let CH={};
 const DAYS=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 const SS=['Baseline','Signal','QC','Ray','Pinnacle','Central','LoneCactus','Tbird','Litchfield','83rd','Peoria','Jackrabbit','Wilmot1','Alvernon','Wilmot2','Marketplace','Copper','Milton','BlueDiamond','Prescott','Alma','PowerRay'];
@@ -4920,6 +4936,8 @@ function _valueLabelsPlugin(formatter){
   return{
     id:'valueLabels',
     afterDatasetsDraw(chart){
+      // Global on/off — hover tooltips remain unaffected because this only skips drawing the inline labels
+      if(window.APP&&APP.showChartLabels===false)return;
       const ctx=chart.ctx;
       ctx.save();
       ctx.font='600 11px Inter,system-ui,sans-serif';
@@ -5361,6 +5379,7 @@ function exportTableToXLSX(){
 // Auto-load saved data on page open — only after auth passes
 // ── Page startup: restore session for returning users ────────────────────────
 document.addEventListener('DOMContentLoaded', function() {
+  _refreshChartValuesUI();
   const stored = localStorage.getItem(SIGNIN_KEY);
   if (stored && stored.toLowerCase().endsWith('@angies.com')) {
     document.getElementById('signinOv').style.display = 'none';
