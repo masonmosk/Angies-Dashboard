@@ -183,8 +183,12 @@ input[type=file]{display:none}
 .cmp-metric-label{color:var(--navy);font-weight:600}
 .cmp-metric-cat{color:var(--gtxt);font-size:10px;text-transform:uppercase;letter-spacing:.4px;margin-right:8px;padding:2px 6px;background:#eef1f7;border-radius:4px;display:inline-block;min-width:54px;text-align:center}
 /* Selection rows (multi-comparison support) */
-.cmp-row{display:grid;grid-template-columns:36px 160px 150px 1fr auto auto;gap:10px;align-items:center;background:var(--wh);border:1px solid var(--bdr);border-radius:10px;padding:10px 12px;margin-bottom:8px;border-left-width:4px;border-left-style:solid;position:relative}
-@media(max-width:900px){.cmp-row{grid-template-columns:36px 1fr 1fr;gap:8px}.cmp-row .cmp-row-sep,.cmp-row .cmp-row-remove{grid-column:span 1}}
+.cmp-row{display:grid;grid-template-columns:18px 36px 160px 150px 1fr auto auto;gap:10px;align-items:center;background:var(--wh);border:1px solid var(--bdr);border-radius:10px;padding:10px 12px;margin-bottom:8px;border-left-width:4px;border-left-style:solid;position:relative;transition:transform .12s,opacity .12s,box-shadow .12s}
+@media(max-width:900px){.cmp-row{grid-template-columns:18px 36px 1fr 1fr;gap:8px}.cmp-row .cmp-row-sep,.cmp-row .cmp-row-remove{grid-column:span 1}}
+.cmp-row-handle{color:var(--gtxt);font-size:14px;line-height:1;letter-spacing:-2px;cursor:grab;text-align:center;user-select:none;padding:4px 0}
+.cmp-row-handle:active{cursor:grabbing}
+.cmp-row-dragging{opacity:.4;box-shadow:0 8px 22px rgba(0,0,0,.15)}
+.cmp-row-dragover{outline:2px dashed var(--red);outline-offset:-2px;background:#fff5f3}
 .cmp-row-num{font-family:'Oswald',sans-serif;font-size:14px;font-weight:700;color:#fff;background:var(--navy);border-radius:6px;padding:4px 0;text-align:center}
 .cmp-row select{padding:6px 8px;border:1px solid var(--bdr);border-radius:6px;font-size:12px;background:var(--wh);color:var(--navy);width:100%}
 .cmp-row-locs{position:relative}
@@ -219,10 +223,6 @@ input[type=file]{display:none}
 .cmp-modal-title{font-weight:700;font-size:14px;font-family:'Oswald',sans-serif;letter-spacing:.4px}
 .cmp-modal-close{background:transparent;border:0;color:#fff;font-size:24px;cursor:pointer;line-height:1;padding:0 4px}
 .cmp-modal-close:hover{color:var(--gold)}
-.cmp-chart-toggle{display:inline-flex;background:rgba(255,255,255,.08);border-radius:6px;padding:2px;gap:2px}
-.cmp-chart-mode-btn{background:transparent;color:#fff;border:0;border-radius:4px;padding:5px 10px;font-size:11px;font-weight:600;cursor:pointer;letter-spacing:.3px;opacity:.75}
-.cmp-chart-mode-btn.on{background:rgba(255,255,255,.18);opacity:1}
-.cmp-chart-mode-btn:hover:not(.on){background:rgba(255,255,255,.08)}
 .cmp-modal-body{padding:18px;flex:1;overflow:auto}
 .oh-st{padding:5px 16px;border-radius:20px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid var(--bdr);background:var(--wh);color:var(--navy);transition:all .18s}
 .oh-st.on{background:var(--red);color:#fff;border-color:var(--red)}
@@ -766,13 +766,7 @@ input[type=file]{display:none}
       <div class="cmp-modal">
         <div class="cmp-modal-hdr">
           <div class="cmp-modal-title" id="cmpChartTitle">Metric Chart</div>
-          <div style="display:flex;gap:8px;align-items:center">
-            <div class="cmp-chart-toggle">
-              <button id="cmpChartModeTrend" class="cmp-chart-mode-btn on" onclick="cmpSetChartMode('trend')" title="Line chart with time on the x-axis — see daily/weekly trends">📈 Trend</button>
-              <button id="cmpChartModeBar" class="cmp-chart-mode-btn" onclick="cmpSetChartMode('totals')" title="Bar chart with one bar per selection — see totals">📊 Totals</button>
-            </div>
-            <button class="cmp-modal-close" onclick="cmpCloseChart()" aria-label="Close">×</button>
-          </div>
+          <button class="cmp-modal-close" onclick="cmpCloseChart()" aria-label="Close">×</button>
         </div>
         <div class="cmp-modal-body">
           <div style="height:380px"><canvas id="cmpChartCanvas"></canvas></div>
@@ -2469,8 +2463,16 @@ function _cmpRenderSelectionRow(sel,idx){
   const weekOpts=['<option value="_period" '+(sel.week==='_period'?'selected':'')+'>⊞ Period Summary</option>']
     .concat(wks.map(w=>{const sd=pd&&pd.all&&pd.all[w]?pd.all[w].sd:'';return`<option value="${w}" ${w===sel.week?'selected':''}>${w.replace('Week ','Wk ')}${sd?' ('+sd+')':''}</option>`;})).join('');
   const locLabel=_cmpLocsLabel(sel.locs);
-  const showSep=(sel.locs||[]).length>1||sel.locs[0]!=='AllStores'&&APP.districts.find(d=>d.id===sel.locs[0]);
-  return `<div class="cmp-row" data-id="${sel.id}" style="border-left-color:${color}">
+  // "Show separately" is meaningful when multiple stores/districts/AllStores are mixed
+  // OR a single district is picked (which expands to its constituent stores).
+  // Always enable so users can click freely; expand logic gracefully handles single-loc case.
+  return `<div class="cmp-row" data-id="${sel.id}" style="border-left-color:${color}" draggable="true"
+      ondragstart="cmpDragStart(event,'${sel.id}')"
+      ondragover="cmpDragOver(event)"
+      ondragleave="cmpDragLeave(event)"
+      ondrop="cmpDrop(event,'${sel.id}')"
+      ondragend="cmpDragEnd(event)">
+    <div class="cmp-row-handle" title="Drag to reorder">⋮⋮</div>
     <div class="cmp-row-num" style="background:${color}">#${idx+1}</div>
     <select onchange="cmpUpdSel('${sel.id}','period',this.value)">${periodOpts}</select>
     <select onchange="cmpUpdSel('${sel.id}','week',this.value)">${weekOpts}</select>
@@ -2480,12 +2482,45 @@ function _cmpRenderSelectionRow(sel,idx){
       </button>
       <div class="cmp-loc-picker" id="locp_${sel.id}">${_cmpLocPickerHTML(sel)}</div>
     </div>
-    <label class="cmp-row-sep" title="When multiple stores are selected, show each as its own column instead of one aggregated column">
-      <input type="checkbox" ${sel.separate?'checked':''} ${showSep?'':'disabled'} onchange="cmpUpdSel('${sel.id}','separate',this.checked)">
+    <label class="cmp-row-sep" title="Split this row into a column per store. Only applies when multiple stores or a district is selected.">
+      <input type="checkbox" ${sel.separate?'checked':''} onchange="cmpUpdSel('${sel.id}','separate',this.checked)">
       Show separately
     </label>
     <button class="cmp-row-remove" onclick="cmpRemoveSelection('${sel.id}')" title="Remove this comparison" type="button">×</button>
   </div>`;
+}
+
+// ── Drag-to-reorder selection rows ──
+let _cmpDraggedId=null;
+function cmpDragStart(ev,id){
+  _cmpDraggedId=id;
+  ev.dataTransfer.effectAllowed='move';
+  ev.dataTransfer.setData('text/plain',id);
+  ev.currentTarget.classList.add('cmp-row-dragging');
+}
+function cmpDragOver(ev){
+  ev.preventDefault();
+  ev.dataTransfer.dropEffect='move';
+  ev.currentTarget.classList.add('cmp-row-dragover');
+}
+function cmpDragLeave(ev){
+  ev.currentTarget.classList.remove('cmp-row-dragover');
+}
+function cmpDragEnd(ev){
+  document.querySelectorAll('.cmp-row-dragover').forEach(r=>r.classList.remove('cmp-row-dragover'));
+  document.querySelectorAll('.cmp-row-dragging').forEach(r=>r.classList.remove('cmp-row-dragging'));
+  _cmpDraggedId=null;
+}
+function cmpDrop(ev,targetId){
+  ev.preventDefault();
+  ev.currentTarget.classList.remove('cmp-row-dragover');
+  if(!_cmpDraggedId||_cmpDraggedId===targetId)return;
+  const srcIdx=CMP.selections.findIndex(s=>s.id===_cmpDraggedId);
+  const tgtIdx=CMP.selections.findIndex(s=>s.id===targetId);
+  if(srcIdx<0||tgtIdx<0)return;
+  const [moved]=CMP.selections.splice(srcIdx,1);
+  CMP.selections.splice(tgtIdx,0,moved);
+  _cmpSaveSelections();_cmpRenderSelections();updCompare();_cmpReRenderChartIfOpen();
 }
 function _cmpLocsLabel(locs){
   if(!locs||!locs.length)return 'Select stores…';
@@ -2538,12 +2573,17 @@ document.addEventListener('click',e=>{
     document.querySelectorAll('.cmp-loc-picker.on').forEach(p=>p.classList.remove('on'));
   }
 });
+// Re-render the open chart (if any) when selections change
+function _cmpReRenderChartIfOpen(){
+  const mod=document.getElementById('cmpChartModal');
+  if(mod&&mod.classList.contains('on')&&CMP._chartMetric)_cmpRenderChart();
+}
 function cmpToggleLoc(id,loc,checked){
   const sel=CMP.selections.find(s=>s.id===id);if(!sel)return;
   if(checked){if(!sel.locs.includes(loc))sel.locs.push(loc);}
   else{sel.locs=sel.locs.filter(l=>l!==loc);}
   if(!sel.locs.length)sel.locs=['AllStores']; // never empty
-  _cmpSaveSelections();_cmpRenderSelections();updCompare();
+  _cmpSaveSelections();_cmpRenderSelections();updCompare();_cmpReRenderChartIfOpen();
 }
 function cmpUpdSel(id,field,val){
   const sel=CMP.selections.find(s=>s.id===id);if(!sel)return;
@@ -2560,7 +2600,7 @@ function cmpUpdSel(id,field,val){
     }
     _cmpRenderSelections();
   }
-  _cmpSaveSelections();updCompare();
+  _cmpSaveSelections();updCompare();_cmpReRenderChartIfOpen();
 }
 function cmpAddSelection(){
   // Copy the last selection's settings as a starting point
@@ -2575,12 +2615,12 @@ function cmpAddSelection(){
     if(idx>0)wk=wks[idx-1];
   }
   CMP.selections.push({id:_cmpNewId(),period:periodKey,week:wk,locs:last?last.locs.slice():['AllStores'],separate:!!(last&&last.separate)});
-  _cmpSaveSelections();_cmpRenderSelections();updCompare();
+  _cmpSaveSelections();_cmpRenderSelections();updCompare();_cmpReRenderChartIfOpen();
 }
 function cmpRemoveSelection(id){
   if(CMP.selections.length<=1){showToast('Need at least one comparison row.',3000);return;}
   CMP.selections=CMP.selections.filter(s=>s.id!==id);
-  _cmpSaveSelections();_cmpRenderSelections();updCompare();
+  _cmpSaveSelections();_cmpRenderSelections();updCompare();_cmpReRenderChartIfOpen();
 }
 
 // ── Metric picker (unchanged) ──
@@ -2795,41 +2835,11 @@ function updCompare(){
 }
 
 // ── Chart modal ──
-// Get daily array (length 7 for week, length N for _period across weeks) for any metric
-// including computed metrics (_sV, _sVP, _hV, _trHV, _acc).
-function _cmpDailyArray(col,mk){
-  const d=_cmpAggregateLocs(col.period,col.locs);
-  if(!d)return null;
-  // For Period Summary, expand across weeks
-  if(col.week==='_period'){
-    const pd=APP.monthly[col.period];if(!pd||!pd.weeks)return null;
-    return pd.weeks.map(wk=>_cmpCompute(d,wk,mk));
-  }
-  // For a specific week, return the 7-day daily array
-  const wd=d[col.week];
-  if(!wd||!wd.m)return null;
-  const _da=(k)=>(wd.m[k]&&wd.m[k].d)?wd.m[k].d.slice():[0,0,0,0,0,0,0];
-  // Computed metrics — derive daily arrays from underlying metrics
-  if(mk==='_sV'){const a=_da('acS'),p=_da('pjS');return a.map((v,i)=>p[i]>0?v-p[i]:0);}
-  if(mk==='_sVP'){const a=_da('acS'),p=_da('pjS');return a.map((v,i)=>p[i]>0?(v-p[i])/p[i]:0);}
-  if(mk==='_hV'){const a=_da('acH'),s=_da('scH');return a.map((v,i)=>v-s[i]);}
-  if(mk==='_trHV'){const a=_da('acTrH'),s=_da('scTrH');return a.map((v,i)=>(v||s[i])?v-s[i]:0);}
-  if(mk==='_acc'){const c=_da('comp'),t=_da('txns');return c.map((v,i)=>t[i]>0?v/t[i]*1000:0);}
-  return _da(mk);
-}
-
-CMP._chartMode='trend'; // 'trend' (line by time) | 'totals' (bar by location)
-
 function cmpOpenChart(mk){
   const m=EXPORT_METRICS.find(x=>x.k===mk);if(!m)return;
   CMP._chartMetric=mk;
   _cmpRenderChart();
   document.getElementById('cmpChartModal').classList.add('on');
-}
-function cmpSetChartMode(mode){
-  if(mode!=='trend'&&mode!=='totals')return;
-  CMP._chartMode=mode;
-  _cmpRenderChart();
 }
 function _cmpRenderChart(){
   const mk=CMP._chartMetric;if(!mk)return;
@@ -2840,96 +2850,47 @@ function _cmpRenderChart(){
   const scale=scaleByFmt[m.fmt]||1;
   const unit=m.fmt==='%'||m.fmt==='%±'?'%':m.fmt==='$'||m.fmt==='$±'||m.fmt==='$1'?'$':m.fmt==='time'?'s':'';
   const tooltipFmt=v=>_cmpFmt(v/scale,m.fmt);
-  // Update title + toggle buttons
   document.getElementById('cmpChartTitle').textContent=`${m.cat} — ${m.label}`;
-  const tBar=document.getElementById('cmpChartModeBar');
-  const tTrend=document.getElementById('cmpChartModeTrend');
-  if(tBar&&tTrend){
-    tBar.classList.toggle('on',CMP._chartMode==='totals');
-    tTrend.classList.toggle('on',CMP._chartMode==='trend');
-  }
   if(CMP._chart){try{CMP._chart.destroy();}catch(e){}CMP._chart=null;}
   const canvas=document.getElementById('cmpChartCanvas');if(!canvas)return;
-
-  if(CMP._chartMode==='trend'){
-    // Line chart: x-axis = time (Mon-Sun for weeks, Week 1/2/... for Period Summary)
-    // If any col is _period, x-axis spans the longest period's weeks.
-    // Otherwise x-axis is Mon-Sun.
-    const hasPeriod=cols.some(c=>c.week==='_period');
-    let labels;
-    if(hasPeriod){
-      // Use the weeks of the period with the most weeks
-      const periodCols=cols.filter(c=>c.week==='_period');
-      const longest=periodCols.reduce((best,c)=>{const pd=APP.monthly[c.period];const w=pd?(pd.weeks||[]):[];return w.length>best.length?w:best;},[]);
-      labels=longest.length?longest:DAYS;
-    } else {
-      labels=DAYS.slice();
-    }
-    const datasets=cols.map(c=>{
-      let arr=_cmpDailyArray(c,mk);
-      if(!arr)arr=[];
-      // Apply percentage scaling for display
-      arr=arr.map(v=>v==null?null:v*scale);
-      // Pad/truncate to labels length
-      while(arr.length<labels.length)arr.push(null);
-      if(arr.length>labels.length)arr=arr.slice(0,labels.length);
-      return{
-        label:c.header,
-        data:arr,
-        borderColor:c.accent,
-        backgroundColor:c.accent+'22',
-        pointBackgroundColor:c.accent,
-        pointBorderColor:'#fff',
-        pointBorderWidth:2,
-        pointRadius:4,
-        pointHoverRadius:6,
-        borderWidth:2.5,
-        fill:false,
-        tension:.3,
-        spanGaps:true
-      };
-    });
-    CMP._chart=new Chart(canvas,{
-      type:'line',
-      data:{labels,datasets},
-      options:{
-        responsive:true,maintainAspectRatio:false,
-        plugins:{
-          legend:{position:'bottom',labels:{boxWidth:14,padding:10,font:{size:11}}},
-          tooltip:{callbacks:{label:c=>c.dataset.label+': '+tooltipFmt(c.raw||0)}}
-        },
-        scales:{
-          x:{ticks:{font:{size:11}}},
-          y:{beginAtZero:true,ticks:{callback:v=>{if(unit==='$')return'$'+(v>=1000?Math.round(v/1000)+'k':v);if(unit==='%')return v.toFixed(1)+'%';if(unit==='s')return tF(v);return v;}}}
-        },
-        layout:{padding:{top:24}}
+  // X-axis = the comparison columns in their selected order (drag to reorder).
+  // Each column is one point; the line shows how the metric trends across the
+  // dimensions being compared (weeks, periods, stores — whatever is in the rows).
+  const labels=cols.map(c=>c.header);
+  const vals=cols.map(c=>_cmpColValue(c,mk));
+  const data=vals.map(v=>v==null?null:v*scale);
+  const pointColors=cols.map(c=>c.accent);
+  CMP._chart=new Chart(canvas,{
+    type:'line',
+    data:{labels,datasets:[{
+      label:m.label,
+      data,
+      borderColor:'#94a3b8',           // neutral gray line connecting all points
+      backgroundColor:'rgba(148,163,184,.10)',
+      pointBackgroundColor:pointColors, // each point coloured by its selection accent
+      pointBorderColor:'#fff',
+      pointBorderWidth:2,
+      pointRadius:7,
+      pointHoverRadius:9,
+      borderWidth:2.5,
+      fill:false,
+      tension:0,                       // straight segments — clearer point-to-point comparison
+      spanGaps:true
+    }]},
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{
+        legend:{display:false},
+        tooltip:{callbacks:{label:c=>tooltipFmt(c.raw||0)}}
       },
-      plugins:[_valueLabelsPlugin(v=>tooltipFmt(v))]
-    });
-  } else {
-    // Bar chart: one bar per column (totals)
-    const vals=cols.map(c=>_cmpColValue(c,mk));
-    const data=vals.map(v=>v==null?null:v*scale);
-    const labels=cols.map(c=>c.header);
-    const backgroundColors=cols.map(c=>c.accent);
-    CMP._chart=new Chart(canvas,{
-      type:'bar',
-      data:{labels,datasets:[{label:m.label,data,backgroundColor:backgroundColors,borderRadius:6,borderWidth:0}]},
-      options:{
-        responsive:true,maintainAspectRatio:false,
-        plugins:{
-          legend:{display:false},
-          tooltip:{callbacks:{label:c=>tooltipFmt(c.raw||0)}}
-        },
-        scales:{
-          x:{ticks:{font:{size:11},maxRotation:30,minRotation:0,autoSkip:false}},
-          y:{beginAtZero:true,ticks:{callback:v=>{if(unit==='$')return'$'+(v>=1000?Math.round(v/1000)+'k':v);if(unit==='%')return v.toFixed(1)+'%';if(unit==='s')return tF(v);return v;}}}
-        },
-        layout:{padding:{top:24}}
+      scales:{
+        x:{ticks:{font:{size:11},maxRotation:25,minRotation:0,autoSkip:false}},
+        y:{beginAtZero:true,ticks:{callback:v=>{if(unit==='$')return'$'+(v>=1000?Math.round(v/1000)+'k':v);if(unit==='%')return v.toFixed(1)+'%';if(unit==='s')return tF(v);return v;}}}
       },
-      plugins:[_valueLabelsPlugin(v=>tooltipFmt(v))]
-    });
-  }
+      layout:{padding:{top:28,right:8}}
+    },
+    plugins:[_valueLabelsPlugin(v=>tooltipFmt(v))]
+  });
 }
 function cmpCloseChart(){
   const mod=document.getElementById('cmpChartModal');if(mod)mod.classList.remove('on');
