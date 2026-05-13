@@ -587,7 +587,6 @@ input[type=file]{display:none}
     <span class="cfg-bar-lbl">Configure</span>
     <button class="cfg-btn" id="cfgDistBtn" onclick="toggleCfg('dist')">📍 Districts</button>
     <button class="cfg-btn" id="cfgSetBtn" onclick="toggleCfg('settings')">⚙ Settings</button>
-    <button class="cfg-btn" id="cfgValuesBtn" onclick="toggleChartValues()" title="Show or hide inline value labels on line charts">📊 Values</button>
   </div>
   <div class="cfg-panel" id="cfg-dist"><!-- Districts panel inserted by JS --></div>
   <div class="cfg-panel" id="cfg-settings"><!-- Settings panel inserted by JS --></div>
@@ -798,6 +797,9 @@ input[type=file]{display:none}
       <div class="cmp-modal">
         <div class="cmp-modal-hdr">
           <div class="cmp-modal-title" id="cmpChartTitle">Metric Chart</div>
+          <label id="cmpChartValuesToggle" style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--gtxt);margin-left:auto;margin-right:10px;cursor:pointer;user-select:none">
+            <input type="checkbox" id="cmpChartValuesChk" onchange="cmpToggleChartValues(this.checked)" style="margin:0"> Show values
+          </label>
           <button class="cmp-modal-close" onclick="cmpCloseChart()" aria-label="Close">×</button>
         </div>
         <div class="cmp-modal-body">
@@ -811,22 +813,7 @@ input[type=file]{display:none}
 </div>
 
 <script>
-const APP={monthly:{},labels:{},districts:[],period:null,week:null,day:'all',loc:'AllStores',sosSub:'win',sosLd:{win:'all',kio:'all'},goals:{labor:24,salesVar:-5,sos:120,acc:1.0},_expMetrics:null,tblSort:{},autoExport:{enabled:false,profiles:[]},_ohSub:0,_scSk:null,showChartLabels:(function(){try{const v=localStorage.getItem('angies_show_chart_labels');return v===null?true:v==='1';}catch(e){return true;}})()};
-function toggleChartValues(){
-  APP.showChartLabels=!APP.showChartLabels;
-  try{localStorage.setItem('angies_show_chart_labels',APP.showChartLabels?'1':'0');}catch(e){}
-  _refreshChartValuesUI();
-  // Redraw all live charts so the plugin gate is re-evaluated
-  try{if(window.CH)Object.values(CH).forEach(c=>{if(c&&c.update)c.update('none');});}catch(e){}
-  try{if(window.CMP&&CMP._chart&&CMP._chart.update)CMP._chart.update('none');}catch(e){}
-}
-function _refreshChartValuesUI(){
-  const btn=document.getElementById('cfgValuesBtn');if(!btn)return;
-  const on=APP.showChartLabels!==false;
-  btn.classList.toggle('on',on);
-  btn.textContent=on?'📊 Values':'📊 Values: off';
-  btn.style.opacity=on?'':'0.7';
-}
+const APP={monthly:{},labels:{},districts:[],period:null,week:null,day:'all',loc:'AllStores',sosSub:'win',sosLd:{win:'all',kio:'all'},goals:{labor:24,salesVar:-5,sos:120,acc:1.0},_expMetrics:null,tblSort:{},autoExport:{enabled:false,profiles:[]},_ohSub:0,_scSk:null};
 let CH={};
 const DAYS=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 const SS=['Baseline','Signal','QC','Ray','Pinnacle','Central','LoneCactus','Tbird','Litchfield','83rd','Peoria','Jackrabbit','Wilmot1','Alvernon','Wilmot2','Marketplace','Copper','Milton','BlueDiamond','Prescott','Alma','PowerRay'];
@@ -3189,7 +3176,23 @@ function _cmpRenderChart(){
       layout:{padding:{top:28,right:8}}
     };
   }
+  // Apply the per-Compare-chart "Show values" preference (default off so the chart isn't busy)
+  const showVals=_cmpGetShowValues();
+  if(!chartOptions.plugins)chartOptions.plugins={};
+  chartOptions.plugins.valueLabels={enabled:showVals};
   CMP._chart=new Chart(canvas,{type:'line',data:chartData,options:chartOptions,plugins:[_valueLabelsPlugin(v=>tooltipFmt(v))]});
+  // Sync the toggle checkbox state
+  const chk=document.getElementById('cmpChartValuesChk');if(chk)chk.checked=showVals;
+}
+function _cmpGetShowValues(){try{return localStorage.getItem('angies_cmp_show_values')==='1';}catch(e){return false;}}
+function cmpToggleChartValues(checked){
+  try{localStorage.setItem('angies_cmp_show_values',checked?'1':'0');}catch(e){}
+  if(CMP._chart){
+    const opts=CMP._chart.options;
+    if(!opts.plugins)opts.plugins={};
+    opts.plugins.valueLabels={enabled:!!checked};
+    CMP._chart.update('none');
+  }
 }
 function cmpCloseChart(){
   const mod=document.getElementById('cmpChartModal');if(mod)mod.classList.remove('on');
@@ -4936,8 +4939,9 @@ function _valueLabelsPlugin(formatter){
   return{
     id:'valueLabels',
     afterDatasetsDraw(chart){
-      // Global on/off — hover tooltips remain unaffected because this only skips drawing the inline labels
-      if(window.APP&&APP.showChartLabels===false)return;
+      // Per-chart opt-out via chart options (Compare uses this to hide inline labels on demand).
+      // Tooltips on hover remain unaffected because they're a separate Chart.js subsystem.
+      if(chart.options&&chart.options.plugins&&chart.options.plugins.valueLabels&&chart.options.plugins.valueLabels.enabled===false)return;
       const ctx=chart.ctx;
       ctx.save();
       ctx.font='600 11px Inter,system-ui,sans-serif';
@@ -5379,7 +5383,6 @@ function exportTableToXLSX(){
 // Auto-load saved data on page open — only after auth passes
 // ── Page startup: restore session for returning users ────────────────────────
 document.addEventListener('DOMContentLoaded', function() {
-  _refreshChartValuesUI();
   const stored = localStorage.getItem(SIGNIN_KEY);
   if (stored && stored.toLowerCase().endsWith('@angies.com')) {
     document.getElementById('signinOv').style.display = 'none';
