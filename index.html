@@ -4487,22 +4487,22 @@ function renderWeekNoteBanner(){
   if(!APP.weekNotes)APP.weekNotes=_loadWeekNotes();
   let banner=document.getElementById('weekNoteBanner');
   const periodKey=APP.period;
-  // Collect every note attached to the currently selected period
-  const prefix=periodKey?(periodKey+'::'):null;
-  const entries=[];
-  if(prefix){
-    Object.keys(APP.weekNotes||{}).forEach(k=>{
-      if(k.indexOf(prefix)!==0)return;
-      const wk=k.slice(prefix.length);
-      const txt=(APP.weekNotes[k]||'').trim();
-      if(!txt)return;
-      // Sort numeric week first, then "_period" / strings
-      const n=parseInt(wk,10);
-      entries.push({wk,txt,sort:isNaN(n)?999:n});
-    });
-    entries.sort((a,b)=>a.sort-b.sort);
+  if(!periodKey){if(banner)banner.style.display='none';document.body.style.paddingTop='';return;}
+  // Build the list of weeks for the selected period.  Prefer the loaded data
+  // (APP.monthly[periodKey].weeks) so every week shows up — even ones with no note.
+  // Fall back to keys present in APP.weekNotes if data isn't loaded yet.
+  const pd=APP.monthly&&APP.monthly[periodKey];
+  let weekList=pd&&Array.isArray(pd.weeks)?pd.weeks.slice():[];
+  if(!weekList.length){
+    const prefix=periodKey+'::';
+    weekList=Object.keys(APP.weekNotes||{}).filter(k=>k.indexOf(prefix)===0).map(k=>k.slice(prefix.length));
   }
-  if(!entries.length){if(banner)banner.style.display='none';document.body.style.paddingTop='';return;}
+  // Skip the synthetic "_period" entry and de-dup
+  weekList=Array.from(new Set(weekList.filter(w=>w&&w!=='_period')));
+  // Sort numeric weeks ascending, non-numeric last
+  weekList.sort((a,b)=>{const na=parseInt(a,10),nb=parseInt(b,10);if(isNaN(na)&&isNaN(nb))return 0;if(isNaN(na))return 1;if(isNaN(nb))return -1;return na-nb;});
+  if(!weekList.length){if(banner)banner.style.display='none';document.body.style.paddingTop='';return;}
+  const entries=weekList.map(wk=>({wk,txt:((APP.weekNotes&&APP.weekNotes[_weekNoteKey(periodKey,wk)])||'').trim()}));
   _ensureWeekNoteBannerCSS();
   if(!banner){
     banner=document.createElement('div');
@@ -4515,13 +4515,19 @@ function renderWeekNoteBanner(){
     const n=parseInt(wk,10);
     return isNaN(n)?wk:('Wk '+n);
   };
-  // Build the run of items once
-  const items=entries.map(e=>`<span><strong>${esc(labelFor(e.wk))}</strong>${esc(e.txt)}</span><span class="wnb-dot">◆</span>`).join('');
+  // Build the run of items — empty notes render as "None" in a muted style
+  const items=entries.map(e=>{
+    const body=e.txt?esc(e.txt):'<em style="opacity:.55;font-style:italic">None</em>';
+    return `<span><strong>${esc(labelFor(e.wk))}</strong>${body}</span><span class="wnb-dot">◆</span>`;
+  }).join('');
   // Duplicate so the marquee loops seamlessly (translateX -50%)
   // Scale the animation duration to total content length so longer feeds aren't too fast
-  const totalChars=entries.reduce((a,e)=>a+e.txt.length+8,0);
+  const totalChars=entries.reduce((a,e)=>a+(e.txt||'None').length+8,0);
   const duration=Math.max(20,Math.min(90,Math.round(totalChars/8)));
-  const countLabel=entries.length===1?'Week Note':(entries.length+' Notes');
+  const noteCount=entries.filter(e=>e.txt).length;
+  const periodLabel=(APP.labels&&APP.labels[periodKey])||periodKey;
+  // Compact label for the gold tag: prefer the period nickname, fallback to count
+  const countLabel=noteCount?(periodLabel+' · '+noteCount+(noteCount===1?' note':' notes')):(periodLabel+' · no notes');
   banner.innerHTML=`
     <div class="wnb-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1Z"/></svg>${esc(countLabel)}</div>
     <div class="wnb-track"><div class="wnb-marquee" style="animation-duration:${duration}s">${items}${items}</div></div>
