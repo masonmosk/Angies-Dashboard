@@ -182,6 +182,44 @@ input[type=file]{display:none}
 .cmp-delta-neu{color:var(--gtxt)}
 .cmp-metric-label{color:var(--navy);font-weight:600}
 .cmp-metric-cat{color:var(--gtxt);font-size:10px;text-transform:uppercase;letter-spacing:.4px;margin-right:8px;padding:2px 6px;background:#eef1f7;border-radius:4px;display:inline-block;min-width:54px;text-align:center}
+/* Selection rows (multi-comparison support) */
+.cmp-row{display:grid;grid-template-columns:36px 160px 150px 1fr auto auto;gap:10px;align-items:center;background:var(--wh);border:1px solid var(--bdr);border-radius:10px;padding:10px 12px;margin-bottom:8px;border-left-width:4px;border-left-style:solid;position:relative}
+@media(max-width:900px){.cmp-row{grid-template-columns:36px 1fr 1fr;gap:8px}.cmp-row .cmp-row-sep,.cmp-row .cmp-row-remove{grid-column:span 1}}
+.cmp-row-num{font-family:'Oswald',sans-serif;font-size:14px;font-weight:700;color:#fff;background:var(--navy);border-radius:6px;padding:4px 0;text-align:center}
+.cmp-row select{padding:6px 8px;border:1px solid var(--bdr);border-radius:6px;font-size:12px;background:var(--wh);color:var(--navy);width:100%}
+.cmp-row-locs{position:relative}
+.cmp-loc-btn{padding:6px 10px;border:1px solid var(--bdr);border-radius:6px;background:var(--wh);color:var(--navy);font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:6px;width:100%;text-align:left}
+.cmp-loc-btn:hover{background:#f7f8fb;border-color:var(--navy-l)}
+.cmp-loc-btn .cmp-loc-caret{color:var(--gtxt);font-size:10px}
+.cmp-loc-picker{position:absolute;top:calc(100% + 4px);left:0;right:0;min-width:260px;max-height:340px;overflow:auto;background:#fff;border:1px solid var(--bdr);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.12);z-index:20;padding:8px 10px;display:none}
+.cmp-loc-picker.on{display:block}
+.cmp-loc-picker .cmp-loc-grp{font-size:10px;font-weight:700;color:var(--gtxt);text-transform:uppercase;letter-spacing:.4px;padding:6px 0 2px;border-bottom:1px solid var(--bdr);margin-bottom:4px}
+.cmp-loc-picker label{display:flex;align-items:center;gap:7px;padding:4px 4px;font-size:12px;cursor:pointer;color:var(--navy);border-radius:4px}
+.cmp-loc-picker label:hover{background:#f0f4ff}
+.cmp-loc-picker input{accent-color:var(--red);cursor:pointer}
+.cmp-row-sep{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--gtxt);cursor:pointer;white-space:nowrap;user-select:none}
+.cmp-row-sep input{accent-color:var(--red);cursor:pointer}
+.cmp-row-remove{background:transparent;border:1px solid var(--bdr);color:var(--gtxt);font-size:14px;width:28px;height:28px;border-radius:6px;cursor:pointer;line-height:1;padding:0}
+.cmp-row-remove:hover{background:#fde6e2;color:var(--red);border-color:var(--red)}
+/* Compare result table polish */
+#cmpTbl{border-collapse:separate;border-spacing:0;width:100%}
+#cmpTbl thead th{position:sticky;top:0;z-index:2}
+#cmpTbl tbody tr{cursor:pointer;transition:background .12s}
+#cmpTbl tbody tr:hover td{background:#fff5f3!important}
+#cmpTbl td:first-child,#cmpTbl th:first-child{position:sticky;left:0;background:inherit;z-index:1;text-align:left}
+#cmpTbl th:first-child{background:var(--navy);z-index:3}
+#cmpTbl td:first-child{background:#fff}
+#cmpTbl tr:nth-child(even) td:first-child{background:#f7f8fb}
+#cmpTbl tr:hover td:first-child{background:#fff5f3!important}
+/* Chart modal */
+.cmp-modal-overlay{display:none;position:fixed;inset:0;background:rgba(15,20,35,.55);z-index:200;align-items:center;justify-content:center;padding:20px}
+.cmp-modal-overlay.on{display:flex}
+.cmp-modal{background:#fff;border-radius:12px;max-width:900px;width:100%;max-height:90vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.3)}
+.cmp-modal-hdr{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--bdr);background:var(--navy);color:#fff}
+.cmp-modal-title{font-weight:700;font-size:14px;font-family:'Oswald',sans-serif;letter-spacing:.4px}
+.cmp-modal-close{background:transparent;border:0;color:#fff;font-size:24px;cursor:pointer;line-height:1;padding:0 4px}
+.cmp-modal-close:hover{color:var(--gold)}
+.cmp-modal-body{padding:18px;flex:1;overflow:auto}
 .oh-st{padding:5px 16px;border-radius:20px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid var(--bdr);background:var(--wh);color:var(--navy);transition:all .18s}
 .oh-st.on{background:var(--red);color:#fff;border-color:var(--red)}
 .oh-st:hover:not(.on){background:#f0f3fa}
@@ -697,39 +735,38 @@ input[type=file]{display:none}
     </div>
 
     <div class="pan" id="pan-compare">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:10px">
-        <div class="ct" style="margin-bottom:0">⇄ Comparison — side-by-side lookup</div>
-        <div style="display:flex;gap:8px">
-          <button class="bp" onclick="cmpSwap()" title="Swap A ↔ B">⇅ Swap</button>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:10px">
+        <div class="ct" style="margin-bottom:0">⇄ Comparison</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="bp" onclick="cmpAddSelection()">+ Add Comparison</button>
+          <button class="bp" onclick="cmpExport()" title="Export comparison to Excel">⬇ Export</button>
           <button class="bp" onclick="cmpSelectAll(true)">Select all metrics</button>
           <button class="bp" onclick="cmpSelectAll(false)">Clear all</button>
         </div>
       </div>
-      <div class="cmp-grid">
-        <div class="cmp-card" data-cmp="A">
-          <div class="cmp-card-hdr" style="background:#E8432A">A</div>
-          <div class="cmp-selectors">
-            <label><span class="cmp-lbl">Period</span><select id="cmpAPeriod" onchange="cmpOnChange('A','period')"></select></label>
-            <label><span class="cmp-lbl">Week</span><select id="cmpAWeek" onchange="cmpOnChange('A','week')"></select></label>
-            <label><span class="cmp-lbl">Location</span><select id="cmpALoc" onchange="cmpOnChange('A','loc')"></select></label>
-          </div>
-        </div>
-        <div class="cmp-card" data-cmp="B">
-          <div class="cmp-card-hdr" style="background:#1B2A4A">B</div>
-          <div class="cmp-selectors">
-            <label><span class="cmp-lbl">Period</span><select id="cmpBPeriod" onchange="cmpOnChange('B','period')"></select></label>
-            <label><span class="cmp-lbl">Week</span><select id="cmpBWeek" onchange="cmpOnChange('B','week')"></select></label>
-            <label><span class="cmp-lbl">Location</span><select id="cmpBLoc" onchange="cmpOnChange('B','loc')"></select></label>
-          </div>
-        </div>
-      </div>
+      <div id="cmpSelectionsList"></div>
       <details class="cmp-metrics-wrap" open>
         <summary style="cursor:pointer;padding:8px 0;font-weight:600;color:var(--navy);font-size:13px">Metrics to compare <span id="cmpMetricCount" style="color:var(--gtxt);font-weight:400;font-size:12px"></span></summary>
         <div class="cmp-metrics" id="cmpMetricsBox"></div>
       </details>
-      <div class="tc" style="margin-top:14px">
-        <div class="ct">Comparison</div>
+      <div class="tc" style="margin-top:14px;overflow-x:auto">
+        <div class="ct" style="display:flex;align-items:center;justify-content:space-between">
+          <span>Comparison <span style="font-weight:400;color:var(--gtxt);font-size:11px;text-transform:none;letter-spacing:0">— click a row to see a chart</span></span>
+        </div>
         <table class="dt" id="cmpTbl"></table>
+      </div>
+    </div>
+
+    <!-- Compare chart modal -->
+    <div class="cmp-modal-overlay" id="cmpChartModal" onclick="if(event.target===this)cmpCloseChart()">
+      <div class="cmp-modal">
+        <div class="cmp-modal-hdr">
+          <div class="cmp-modal-title" id="cmpChartTitle">Metric Chart</div>
+          <button class="cmp-modal-close" onclick="cmpCloseChart()" aria-label="Close">×</button>
+        </div>
+        <div class="cmp-modal-body">
+          <div style="height:380px"><canvas id="cmpChartCanvas"></canvas></div>
+        </div>
       </div>
     </div>
 
@@ -2350,19 +2387,56 @@ function goTabWithLoc(s,locKey){
   const cnt=document.querySelector('.cnt');if(cnt)cnt.scrollIntoView({behavior:'smooth',block:'start'});
 }
 // ══════════════════════════════════════════════════════════════════════════
-// COMPARE TAB — side-by-side store/district/week/period comparison
+// COMPARE TAB — multi-selection comparison: N selections × multi-store × metrics
 // ══════════════════════════════════════════════════════════════════════════
-const CMP_STORE_KEY='angies_cmp_metrics';
+const CMP_METRICS_KEY='angies_cmp_metrics';
+const CMP_SELS_KEY='angies_cmp_selections';
 const CMP_DEFAULT=['acS','_sVP','aLP','alLP','aSP','_hV','cars','_acc','cgL','cgC','cgS','cgCh'];
-const CMP={A:{period:null,week:null,loc:'AllStores'},B:{period:null,week:null,loc:'AllStores'},metrics:null,_initialized:false};
+// Distinct colors for selection accents (recycle if >8)
+const CMP_COLORS=['#E8432A','#1B2A4A','#D4A843','#27AE60','#7a3d00','#4a2470','#1a6040','#c04020'];
+const CMP={selections:[],metrics:null,_initialized:false,_uid:0,_chart:null,_lastRows:null};
 
+function _cmpNewId(){return 'sel'+(++CMP._uid)+'_'+Math.random().toString(36).slice(2,6);}
 function _cmpLoadMetrics(){
-  try{const s=localStorage.getItem(CMP_STORE_KEY);if(s){const a=JSON.parse(s);if(Array.isArray(a))return a;}}catch(e){}
+  try{const s=localStorage.getItem(CMP_METRICS_KEY);if(s){const a=JSON.parse(s);if(Array.isArray(a))return a;}}catch(e){}
   return CMP_DEFAULT.slice();
 }
-function _cmpSaveMetrics(){try{localStorage.setItem(CMP_STORE_KEY,JSON.stringify(CMP.metrics));}catch(e){}}
+function _cmpSaveMetrics(){try{localStorage.setItem(CMP_METRICS_KEY,JSON.stringify(CMP.metrics));}catch(e){}}
+function _cmpSaveSelections(){try{localStorage.setItem(CMP_SELS_KEY,JSON.stringify(CMP.selections));}catch(e){}}
+function _cmpLoadSelections(){
+  try{const s=localStorage.getItem(CMP_SELS_KEY);if(s){const a=JSON.parse(s);if(Array.isArray(a)&&a.length){return a.map(x=>({id:x.id||_cmpNewId(),period:x.period||null,week:x.week||null,locs:Array.isArray(x.locs)&&x.locs.length?x.locs:['AllStores'],separate:!!x.separate}));}}}catch(e){}
+  return null;
+}
 
-// Retrieve the data object for a given period+location (mirrors getLData but parameterized)
+// Aggregate parsed data across multiple location keys (stores/districts/AllStores)
+// Uses sum for counts/$ metrics and average for rate metrics (RATE_MK).
+// Returns a data object shaped like pd.all or pd.stores[s] (weeks → {sd, m:{key:{w,d}}})
+function _cmpAggregateLocs(periodKey,locs){
+  const pd=APP.monthly[periodKey];if(!pd||!pd.all)return null;
+  if(!locs||!locs.length)return null;
+  if(locs.length===1)return cmpGetData(periodKey,locs[0]);
+  // Expand any "AllStores" or district refs to concrete store keys; dedupe.
+  const stores=new Set();
+  let useAllShortcut=false;
+  locs.forEach(loc=>{
+    if(loc==='AllStores'){useAllShortcut=true;return;}
+    const di=APP.districts.find(d=>d.id===loc);
+    if(di){di.stores.forEach(s=>stores.add(s));}
+    else if(pd.stores&&pd.stores[loc]){stores.add(loc);}
+  });
+  // If exactly "AllStores" is in mix (and nothing else extra), use pd.all directly — it's pre-aggregated
+  if(useAllShortcut&&stores.size===0)return pd.all;
+  const concrete=Array.from(stores).filter(s=>pd.stores&&pd.stores[s]);
+  if(useAllShortcut){
+    // Combine AllStores with extra stores — fall back to per-store aggregation
+    SS.forEach(s=>{if(pd.stores&&pd.stores[s])stores.add(s);});
+    return aggStores(pd,Array.from(stores));
+  }
+  if(!concrete.length)return null;
+  return aggStores(pd,concrete);
+}
+
+// Retrieve the data object for a single location identifier
 function cmpGetData(periodKey,locKey){
   const pd=APP.monthly[periodKey];
   if(!pd||!pd.all)return null;
@@ -2372,49 +2446,134 @@ function cmpGetData(periodKey,locKey){
   return(pd.stores&&pd.stores[locKey])||null;
 }
 
-// Populate Period select
-function _cmpFillPeriod(side){
-  const sel=document.getElementById('cmp'+side+'Period');if(!sel)return;
-  const cur=CMP[side].period||APP.period;
-  sel.innerHTML='';
-  Object.keys(APP.monthly).forEach(k=>{
-    const o=document.createElement('option');o.value=k;o.textContent=k;sel.appendChild(o);
-  });
-  if([...sel.options].some(o=>o.value===cur)){sel.value=cur;CMP[side].period=cur;}
-  else if(sel.options.length){sel.value=sel.options[0].value;CMP[side].period=sel.value;}
+// ── Selection list rendering ──
+function _cmpRenderSelections(){
+  const box=document.getElementById('cmpSelectionsList');if(!box)return;
+  box.innerHTML=CMP.selections.map((sel,idx)=>_cmpRenderSelectionRow(sel,idx)).join('');
 }
-// Populate Week select for the current period
-function _cmpFillWeek(side){
-  const sel=document.getElementById('cmp'+side+'Week');if(!sel)return;
-  const pd=APP.monthly[CMP[side].period];if(!pd){sel.innerHTML='';return;}
-  const cur=CMP[side].week;
-  sel.innerHTML='<option value="_period">⊞ Period Summary</option>';
-  (pd.weeks||[]).forEach(w=>{
-    const sd=pd.all&&pd.all[w]?pd.all[w].sd:'';
-    const o=document.createElement('option');o.value=w;o.textContent=w.replace('Week ','Wk ')+(sd?' ('+sd+')':'');sel.appendChild(o);
-  });
-  if([...sel.options].some(o=>o.value===cur)){sel.value=cur;}
-  else{sel.value=sel.options[0].value;CMP[side].week=sel.value;}
+function _cmpRenderSelectionRow(sel,idx){
+  const color=CMP_COLORS[idx%CMP_COLORS.length];
+  const pd=APP.monthly[sel.period];
+  const wks=pd?(pd.weeks||[]):[];
+  const periodOpts=Object.keys(APP.monthly).map(k=>`<option value="${k}" ${k===sel.period?'selected':''}>${k}</option>`).join('');
+  const weekOpts=['<option value="_period" '+(sel.week==='_period'?'selected':'')+'>⊞ Period Summary</option>']
+    .concat(wks.map(w=>{const sd=pd&&pd.all&&pd.all[w]?pd.all[w].sd:'';return`<option value="${w}" ${w===sel.week?'selected':''}>${w.replace('Week ','Wk ')}${sd?' ('+sd+')':''}</option>`;})).join('');
+  const locLabel=_cmpLocsLabel(sel.locs);
+  const showSep=(sel.locs||[]).length>1||sel.locs[0]!=='AllStores'&&APP.districts.find(d=>d.id===sel.locs[0]);
+  return `<div class="cmp-row" data-id="${sel.id}" style="border-left-color:${color}">
+    <div class="cmp-row-num" style="background:${color}">#${idx+1}</div>
+    <select onchange="cmpUpdSel('${sel.id}','period',this.value)">${periodOpts}</select>
+    <select onchange="cmpUpdSel('${sel.id}','week',this.value)">${weekOpts}</select>
+    <div class="cmp-row-locs">
+      <button class="cmp-loc-btn" onclick="cmpToggleLocPicker('${sel.id}',event)" type="button">
+        <span>${locLabel}</span><span class="cmp-loc-caret">▼</span>
+      </button>
+      <div class="cmp-loc-picker" id="locp_${sel.id}">${_cmpLocPickerHTML(sel)}</div>
+    </div>
+    <label class="cmp-row-sep" title="When multiple stores are selected, show each as its own column instead of one aggregated column">
+      <input type="checkbox" ${sel.separate?'checked':''} ${showSep?'':'disabled'} onchange="cmpUpdSel('${sel.id}','separate',this.checked)">
+      Show separately
+    </label>
+    <button class="cmp-row-remove" onclick="cmpRemoveSelection('${sel.id}')" title="Remove this comparison" type="button">×</button>
+  </div>`;
 }
-// Populate Location select
-function _cmpFillLoc(side){
-  const sel=document.getElementById('cmp'+side+'Loc');if(!sel)return;
-  const cur=CMP[side].loc;
-  sel.innerHTML='<option value="AllStores">All Stores</option>';
-  if(APP.districts.length){
-    const og=document.createElement('optgroup');og.label='── Districts ──';
-    APP.districts.forEach(d=>{const o=document.createElement('option');o.value=d.id;o.textContent='📍 '+d.name;og.appendChild(o);});
-    sel.appendChild(og);
+function _cmpLocsLabel(locs){
+  if(!locs||!locs.length)return 'Select stores…';
+  if(locs.length===1){
+    const loc=locs[0];
+    if(loc==='AllStores')return 'All Stores';
+    const di=APP.districts.find(d=>d.id===loc);
+    if(di)return '📍 '+di.name;
+    return(SN[loc]||loc)+(STNUM[loc]?' ('+STNUM[loc]+')':'');
   }
-  const og2=document.createElement('optgroup');og2.label='── Individual Stores ──';
-  const pd=APP.monthly[CMP[side].period];
-  SS.forEach(s=>{if(pd&&pd.stores&&pd.stores[s]){const o=document.createElement('option');o.value=s;o.textContent=SN[s]||s;og2.appendChild(o);}});
-  sel.appendChild(og2);
-  if([...sel.options].some(o=>o.value===cur))sel.value=cur;
-  else{sel.value='AllStores';CMP[side].loc='AllStores';}
+  // Multiple — count + labels truncated
+  const names=locs.map(l=>{
+    if(l==='AllStores')return 'All';
+    const di=APP.districts.find(d=>d.id===l);
+    if(di)return di.name;
+    return SN[l]||l;
+  });
+  if(names.length<=3)return names.join(', ');
+  return names.length+' selected';
+}
+function _cmpLocPickerHTML(sel){
+  const selSet=new Set(sel.locs||[]);
+  const pd=APP.monthly[sel.period];
+  let html='';
+  // All Stores
+  html+=`<label><input type="checkbox" ${selSet.has('AllStores')?'checked':''} onchange="cmpToggleLoc('${sel.id}','AllStores',this.checked)"> All Stores</label>`;
+  if(APP.districts.length){
+    html+='<div class="cmp-loc-grp">Districts</div>';
+    APP.districts.forEach(d=>{
+      html+=`<label><input type="checkbox" ${selSet.has(d.id)?'checked':''} onchange="cmpToggleLoc('${sel.id}','${d.id}',this.checked)"> 📍 ${d.name}</label>`;
+    });
+  }
+  html+='<div class="cmp-loc-grp">Individual Stores</div>';
+  SS.forEach(s=>{
+    if(pd&&pd.stores&&pd.stores[s]){
+      const lbl=(STNUM[s]?STNUM[s]+' ':'')+(SN[s]||s);
+      html+=`<label><input type="checkbox" ${selSet.has(s)?'checked':''} onchange="cmpToggleLoc('${sel.id}','${s}',this.checked)"> ${lbl}</label>`;
+    }
+  });
+  return html;
+}
+function cmpToggleLocPicker(id,ev){
+  if(ev)ev.stopPropagation();
+  document.querySelectorAll('.cmp-loc-picker').forEach(p=>{if(p.id!=='locp_'+id)p.classList.remove('on');});
+  const p=document.getElementById('locp_'+id);if(p)p.classList.toggle('on');
+}
+// Close pickers when clicking outside
+document.addEventListener('click',e=>{
+  if(!e.target.closest('.cmp-row-locs')){
+    document.querySelectorAll('.cmp-loc-picker.on').forEach(p=>p.classList.remove('on'));
+  }
+});
+function cmpToggleLoc(id,loc,checked){
+  const sel=CMP.selections.find(s=>s.id===id);if(!sel)return;
+  if(checked){if(!sel.locs.includes(loc))sel.locs.push(loc);}
+  else{sel.locs=sel.locs.filter(l=>l!==loc);}
+  if(!sel.locs.length)sel.locs=['AllStores']; // never empty
+  _cmpSaveSelections();_cmpRenderSelections();updCompare();
+}
+function cmpUpdSel(id,field,val){
+  const sel=CMP.selections.find(s=>s.id===id);if(!sel)return;
+  sel[field]=val;
+  if(field==='period'){
+    // When period changes, validate locs against new period's available stores
+    const pd=APP.monthly[val];
+    if(pd){
+      sel.locs=sel.locs.filter(l=>l==='AllStores'||APP.districts.find(d=>d.id===l)||(pd.stores&&pd.stores[l]));
+      if(!sel.locs.length)sel.locs=['AllStores'];
+      // Reset week if invalid
+      const wks=['_period',...(pd.weeks||[])];
+      if(!wks.includes(sel.week))sel.week='_period';
+    }
+    _cmpRenderSelections();
+  }
+  _cmpSaveSelections();updCompare();
+}
+function cmpAddSelection(){
+  // Copy the last selection's settings as a starting point
+  const last=CMP.selections[CMP.selections.length-1];
+  const periodKey=last?last.period:APP.period;
+  const pd=APP.monthly[periodKey];
+  const wks=pd?(pd.weeks||[]):[];
+  // Default the new selection to "previous week" if possible
+  let wk=last?last.week:(APP.week||'_period');
+  if(last&&last.week&&wks.length){
+    const idx=wks.indexOf(last.week);
+    if(idx>0)wk=wks[idx-1];
+  }
+  CMP.selections.push({id:_cmpNewId(),period:periodKey,week:wk,locs:last?last.locs.slice():['AllStores'],separate:!!(last&&last.separate)});
+  _cmpSaveSelections();_cmpRenderSelections();updCompare();
+}
+function cmpRemoveSelection(id){
+  if(CMP.selections.length<=1){showToast('Need at least one comparison row.',3000);return;}
+  CMP.selections=CMP.selections.filter(s=>s.id!==id);
+  _cmpSaveSelections();_cmpRenderSelections();updCompare();
 }
 
-// Build the metric checkbox grid (called once on init)
+// ── Metric picker (unchanged) ──
 function _cmpBuildMetricsBox(){
   const box=document.getElementById('cmpMetricsBox');if(!box)return;
   const grouped={};
@@ -2452,39 +2611,42 @@ function cmpSelectAll(on){
   box.querySelectorAll('input[type=checkbox]').forEach(cb=>{cb.checked=!!on;});
   cmpMetricChange();
 }
-function cmpSwap(){
-  const a={...CMP.A},b={...CMP.B};CMP.A=b;CMP.B=a;
-  initCompare();updCompare();
-}
-function cmpOnChange(side,field){
-  const sel=document.getElementById('cmp'+side+({period:'Period',week:'Week',loc:'Loc'}[field]));
-  if(!sel)return;
-  CMP[side][field]=sel.value;
-  if(field==='period'){
-    // Reset week to Period Summary when period changes; refill week + loc lists
-    CMP[side].week='_period';
-    _cmpFillWeek(side);_cmpFillLoc(side);
-  }
-  updCompare();
-}
 
-// Initialize compare panel (call when dashboard first shows or data changes)
+// ── Initialize ──
 function initCompare(){
   if(!Object.keys(APP.monthly).length)return;
-  // Defaults: A = current view (current period + current week + current loc), B = same period but Week 1 (or prev week)
-  if(!CMP.A.period)CMP.A.period=APP.period;
-  if(!CMP.A.week)CMP.A.week=APP.week||'_period';
-  if(!CMP.A.loc)CMP.A.loc=APP.loc||'AllStores';
-  if(!CMP.B.period)CMP.B.period=APP.period;
-  if(!CMP.B.week){
-    const pd=APP.monthly[CMP.B.period];
-    const wks=pd&&pd.weeks||[];
-    const idx=wks.indexOf(APP.week||'');
-    CMP.B.week=idx>0?wks[idx-1]:(wks[0]||'_period');
+  // Migrate legacy {A,B} state if present
+  let loaded=_cmpLoadSelections();
+  if(!loaded){
+    // Try legacy migration
+    try{
+      const legacy=localStorage.getItem('angies_cmp');
+      if(legacy){
+        const obj=JSON.parse(legacy);
+        if(obj&&obj.A&&obj.B)loaded=[{id:_cmpNewId(),period:obj.A.period,week:obj.A.week,locs:[obj.A.loc||'AllStores'],separate:false},
+                                    {id:_cmpNewId(),period:obj.B.period,week:obj.B.week,locs:[obj.B.loc||'AllStores'],separate:false}];
+      }
+    }catch(e){}
   }
-  if(!CMP.B.loc)CMP.B.loc=APP.loc||'AllStores';
+  if(loaded&&loaded.length){
+    CMP.selections=loaded;
+  } else {
+    // Default: A = current view, B = previous week
+    const a={id:_cmpNewId(),period:APP.period,week:APP.week||'_period',locs:[APP.loc||'AllStores'],separate:false};
+    const pd=APP.monthly[a.period];const wks=pd?(pd.weeks||[]):[];
+    const idx=wks.indexOf(a.week);
+    const bWk=idx>0?wks[idx-1]:(wks[0]||'_period');
+    const b={id:_cmpNewId(),period:a.period,week:bWk,locs:[a.locs[0]],separate:false};
+    CMP.selections=[a,b];
+  }
+  // Validate periods/weeks still exist
+  CMP.selections.forEach(s=>{
+    if(!APP.monthly[s.period])s.period=APP.period;
+    const pd=APP.monthly[s.period];const wks=['_period',...(pd?pd.weeks||[]:[])];
+    if(!wks.includes(s.week))s.week='_period';
+  });
   if(!CMP.metrics)CMP.metrics=_cmpLoadMetrics();
-  ['A','B'].forEach(side=>{_cmpFillPeriod(side);_cmpFillWeek(side);_cmpFillLoc(side);});
+  _cmpRenderSelections();
   _cmpBuildMetricsBox();
   CMP._initialized=true;
 }
@@ -2540,42 +2702,157 @@ function _cmpLocLabel(locKey){
 }
 function _cmpWeekLabel(wk){return wk==='_period'?'Period Summary':wk;}
 
-// Render the comparison table
+// Expand selections into a flat list of columns. Each "column" is what shows in the table.
+// A selection with separate=false produces 1 column (aggregated across its locs).
+// A selection with separate=true produces N columns, one per individual location.
+function _cmpExpandColumns(){
+  const cols=[];
+  CMP.selections.forEach((sel,idx)=>{
+    const accent=CMP_COLORS[idx%CMP_COLORS.length];
+    if(sel.separate&&sel.locs.length>1){
+      sel.locs.forEach(loc=>{
+        cols.push({
+          selId:sel.id,selIdx:idx,accent,period:sel.period,week:sel.week,
+          locs:[loc],
+          header:_cmpHeaderLabel(sel,[loc],idx)
+        });
+      });
+    } else {
+      cols.push({
+        selId:sel.id,selIdx:idx,accent,period:sel.period,week:sel.week,
+        locs:sel.locs.slice(),
+        header:_cmpHeaderLabel(sel,sel.locs,idx)
+      });
+    }
+  });
+  return cols;
+}
+function _cmpHeaderLabel(sel,locs,idx){
+  const locLbl=locs.length===1?_cmpLocLabel(locs[0]):locs.length+' stores';
+  const wk=_cmpWeekLabel(sel.week||'');
+  return`#${idx+1} · ${locLbl} · ${sel.period||''} ${wk}`;
+}
+function _cmpColValue(col,mk){
+  const d=_cmpAggregateLocs(col.period,col.locs);
+  if(!d)return null;
+  const v=_cmpCompute(d,col.week,mk);
+  return(v==null||isNaN(v))?null:v;
+}
+
+// Render the comparison table — N columns + relative delta against the first column
 function updCompare(){
   const tbl=document.getElementById('cmpTbl');if(!tbl)return;
   if(!CMP._initialized&&Object.keys(APP.monthly).length){initCompare();}
+  if(!CMP.selections||CMP.selections.length===0){tbl.innerHTML='<thead><tr><th>Click "+ Add Comparison" to begin</th></tr></thead>';return;}
   if(!CMP.metrics||!CMP.metrics.length){tbl.innerHTML='<thead><tr><th>Select at least one metric above to compare</th></tr></thead>';return;}
-  const dA=cmpGetData(CMP.A.period,CMP.A.loc);
-  const dB=cmpGetData(CMP.B.period,CMP.B.loc);
-  const aHdr=`A: ${_cmpLocLabel(CMP.A.loc)} — ${CMP.A.period||''} ${_cmpWeekLabel(CMP.A.week||'')}`;
-  const bHdr=`B: ${_cmpLocLabel(CMP.B.loc)} — ${CMP.B.period||''} ${_cmpWeekLabel(CMP.B.week||'')}`;
-  let html=`<thead><tr><th>Metric</th><th class="cmp-num" style="background:#c04020">${aHdr}</th><th class="cmp-num">${bHdr}</th><th class="cmp-num">Δ (A−B)</th><th class="cmp-num">Δ %</th></tr></thead><tbody>`;
-  // Iterate EXPORT_METRICS so the table follows Excel-sheet order regardless of
-  // when each metric was checked (CMP.metrics is just the selection set).
+  const cols=_cmpExpandColumns();
+  if(!cols.length){tbl.innerHTML='<thead><tr><th>Add a comparison to begin</th></tr></thead>';return;}
+  // Header row
+  let html='<thead><tr><th>Metric</th>';
+  cols.forEach((c,i)=>{
+    html+=`<th class="cmp-num" style="background:${c.accent}" title="${c.header}">${c.header}</th>`;
+  });
+  if(cols.length>=2)html+='<th class="cmp-num" title="Difference vs column #1">Δ vs #1</th><th class="cmp-num">Δ %</th>';
+  html+='</tr></thead><tbody>';
+  // Body — iterate EXPORT_METRICS so order mirrors Excel sheet
   const _selSet=new Set(CMP.metrics);
   const selMetrics=EXPORT_METRICS.filter(m=>_selSet.has(m.k));
+  const _rowsForExport=[];
   selMetrics.forEach(m=>{
-    const vA=dA?_cmpCompute(dA,CMP.A.week,m.k):null;
-    const vB=dB?_cmpCompute(dB,CMP.B.week,m.k):null;
-    const hasA=vA!=null&&!isNaN(vA);
-    const hasB=vB!=null&&!isNaN(vB);
-    const delta=(hasA&&hasB)?(vA-vB):null;
-    const pctDelta=(hasA&&hasB&&vB!==0)?(delta/Math.abs(vB))*100:null;
-    // Direction: for most metrics, positive delta means A>B. For labor %, SOS times, accuracy — lower is better.
+    const vals=cols.map(c=>_cmpColValue(c,m.k));
+    const v1=vals[0];
+    const vLast=vals[vals.length-1];
+    const hasFirst=v1!=null;
+    const hasLast=vLast!=null;
+    const delta=cols.length>=2&&hasFirst&&hasLast?(vLast-v1):null;
+    const pctDelta=delta!=null&&v1!==0?(delta/Math.abs(v1))*100:null;
     const lowerBetter=['aLP','pLP','alLP','plLP','_acc','win','winL','winD','winB','kio','kioL','kioD','kioB','comp','wgV'].includes(m.k);
     const dCls=delta==null||delta===0?'cmp-delta-neu':((delta>0)===lowerBetter?'cmp-delta-neg':'cmp-delta-pos');
     const dStr=delta==null?'-':_cmpFmtDelta(delta,m.fmt);
     const pctStr=pctDelta==null?'-':(pctDelta>=0?'+':'')+pctDelta.toFixed(1)+'%';
-    html+=`<tr>
-      <td><span class="cmp-metric-cat">${m.cat}</span><span class="cmp-metric-label">${m.label}</span></td>
-      <td class="cmp-num">${hasA?_cmpFmt(vA,m.fmt):'-'}</td>
-      <td class="cmp-num">${hasB?_cmpFmt(vB,m.fmt):'-'}</td>
-      <td class="cmp-num ${dCls}">${dStr}</td>
-      <td class="cmp-num ${dCls}">${pctStr}</td>
-    </tr>`;
+    let row=`<tr data-mk="${m.k}" onclick="cmpOpenChart('${m.k}')" title="Click for chart">
+      <td><span class="cmp-metric-cat">${m.cat}</span><span class="cmp-metric-label">${m.label}</span></td>`;
+    vals.forEach(v=>{row+=`<td class="cmp-num">${v==null?'-':_cmpFmt(v,m.fmt)}</td>`;});
+    if(cols.length>=2)row+=`<td class="cmp-num ${dCls}">${dStr}</td><td class="cmp-num ${dCls}">${pctStr}</td>`;
+    row+='</tr>';
+    html+=row;
+    // Stash flat data for export
+    _rowsForExport.push({label:m.label,cat:m.cat,fmt:m.fmt,values:vals,delta,pctDelta});
   });
   html+='</tbody>';
   tbl.innerHTML=html;
+  CMP._lastRows={cols,rows:_rowsForExport};
+}
+
+// ── Chart modal ──
+function cmpOpenChart(mk){
+  const m=EXPORT_METRICS.find(x=>x.k===mk);if(!m)return;
+  const cols=_cmpExpandColumns();
+  if(!cols.length)return;
+  const vals=cols.map(c=>_cmpColValue(c,mk));
+  // Apply percentage scaling for display (% metrics are stored as decimals 0-1)
+  const scaleByFmt={'%':100,'%±':100};
+  const scale=scaleByFmt[m.fmt]||1;
+  const data=vals.map(v=>v==null?null:v*scale);
+  const labels=cols.map(c=>c.header);
+  const backgroundColors=cols.map(c=>c.accent);
+  const unit=m.fmt==='%'||m.fmt==='%±'?'%':m.fmt==='$'||m.fmt==='$±'||m.fmt==='$1'?'$':m.fmt==='time'?'s':'';
+  const tooltipFmt=v=>_cmpFmt(v/scale,m.fmt);
+  // Set modal title
+  document.getElementById('cmpChartTitle').textContent=`${m.cat} — ${m.label}`;
+  // Destroy previous chart
+  if(CMP._chart){try{CMP._chart.destroy();}catch(e){}CMP._chart=null;}
+  const canvas=document.getElementById('cmpChartCanvas');if(!canvas)return;
+  CMP._chart=new Chart(canvas,{
+    type:'bar',
+    data:{labels,datasets:[{label:m.label,data,backgroundColor:backgroundColors,borderRadius:6,borderWidth:0}]},
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{
+        legend:{display:false},
+        tooltip:{callbacks:{label:c=>tooltipFmt(c.raw||0)}}
+      },
+      scales:{
+        x:{ticks:{font:{size:11},maxRotation:30,minRotation:0,autoSkip:false}},
+        y:{beginAtZero:true,ticks:{callback:v=>{if(unit==='$')return'$'+(v>=1000?Math.round(v/1000)+'k':v);if(unit==='%')return v.toFixed(1)+'%';if(unit==='s')return tF(v);return v;}}}
+      },
+      layout:{padding:{top:24}}
+    },
+    plugins:[_valueLabelsPlugin(v=>tooltipFmt(v))]
+  });
+  document.getElementById('cmpChartModal').classList.add('on');
+}
+function cmpCloseChart(){
+  const mod=document.getElementById('cmpChartModal');if(mod)mod.classList.remove('on');
+  if(CMP._chart){try{CMP._chart.destroy();}catch(e){}CMP._chart=null;}
+}
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){const mod=document.getElementById('cmpChartModal');if(mod&&mod.classList.contains('on'))cmpCloseChart();}});
+
+// ── Export to Excel ──
+function cmpExport(){
+  if(!CMP._lastRows||!CMP._lastRows.cols||!CMP._lastRows.cols.length){showToast('Nothing to export — pick at least one metric.',3000);return;}
+  const{cols,rows}=CMP._lastRows;
+  const headers=['Category','Metric',...cols.map(c=>c.header)];
+  if(cols.length>=2)headers.push('Δ vs #1','Δ %');
+  const aoa=[headers];
+  rows.forEach(r=>{
+    const row=[r.cat,r.label];
+    r.values.forEach(v=>{row.push(v==null?'':_cmpFmt(v,r.fmt));});
+    if(cols.length>=2){
+      row.push(r.delta==null?'':_cmpFmtDelta(r.delta,r.fmt));
+      row.push(r.pctDelta==null?'':(r.pctDelta>=0?'+':'')+r.pctDelta.toFixed(1)+'%');
+    }
+    aoa.push(row);
+  });
+  const ws=XLSX.utils.aoa_to_sheet(aoa);
+  // Set column widths
+  ws['!cols']=[{wch:10},{wch:28},...cols.map(()=>({wch:32}))];
+  if(cols.length>=2){ws['!cols'].push({wch:14},{wch:10});}
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'Comparison');
+  const ts=new Date().toISOString().slice(0,10);
+  XLSX.writeFile(wb,`angies-comparison-${ts}.xlsx`);
+  showToast('⬇ Comparison exported',3000);
 }
 
 function update(){
