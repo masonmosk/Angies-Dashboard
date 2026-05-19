@@ -1274,13 +1274,19 @@ async function _ghWrite(path,data,msg){
 // ── Push config to GitHub ──
 async function _pushConfigToServer(){
   try{
-    if(!_ghToken())return false;
+    if(!_ghToken()){APP._lastPushErr='No GitHub token configured';return false;}
     const email=localStorage.getItem('angies_auth_email')||'unknown@angies.com';
     const payload={districts:APP.districts,labels:APP.labels,goals:APP.goals,weekNotes:APP.weekNotes||{},_cfgVer:2,updatedBy:email,updatedAt:new Date().toISOString()};
     await _ghWrite('config.json',payload,'Sync config — '+email);
+    APP._lastPushErr=null;
+    APP._lastSyncedAt=payload.updatedAt;
     console.log('[Sync] Config pushed to GitHub');
     return true;
-  }catch(err){console.warn('[Sync] Config push failed:',err.message);return false;}
+  }catch(err){
+    APP._lastPushErr=err&&err.message||String(err);
+    console.warn('[Sync] Config push failed:',APP._lastPushErr);
+    return false;
+  }
 }
 
 // ── Pull config from GitHub and merge ──
@@ -1288,6 +1294,17 @@ async function _pullConfigFromServer(){
   try{
     const cfg=await _ghRead('config.json');
     if(!cfg)return false;
+    // Compare timestamps — if the local copy is NEWER than the server's, the
+    // user has unsynced edits (likely from a failed push).  Don't clobber them.
+    // Instead, try to re-push so the server catches up.
+    let localCfg=null;try{localCfg=await dbLoadConfig();}catch(e){}
+    const serverAt=cfg.updatedAt||'';
+    const localAt=(localCfg&&localCfg.savedAt)||'';
+    if(localAt&&serverAt&&localAt>serverAt){
+      console.log('[Sync] Local config is newer than server — re-pushing instead of pulling');
+      _pushConfigToServer().catch(()=>{});
+      return false;
+    }
     let changed=false;
     if(cfg.districts&&Array.isArray(cfg.districts)){
       const serverIds=new Set(cfg.districts.map(d=>d.id));
@@ -1391,7 +1408,8 @@ async function syncAll(){
       el.classList.remove('hid');
       setTimeout(()=>{el.textContent='☁ Synced '+new Date().toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});},2000);
     }
-    showToast(pushed?'☁ Settings synced — all users will see your changes.':!_ghToken()?'💾 Saved locally — add a GitHub token in Settings to enable cloud sync.':'💾 Settings saved locally (sync unavailable).',5000);
+    const errMsg=APP._lastPushErr?' — '+APP._lastPushErr:'';
+    showToast(pushed?'☁ Settings synced — all users will see your changes.':!_ghToken()?'💾 Saved locally — add a GitHub token in Settings to enable cloud sync.':('⚠ Sync failed'+errMsg+' — changes saved locally only.'),6000);
   }catch(err){
     console.warn('Sync failed',err);
     if(el){el.textContent='⚠ Sync failed';el.classList.remove('hid');}
