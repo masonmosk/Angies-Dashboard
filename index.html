@@ -698,10 +698,10 @@ input[type=file]{display:none}
         <div class="var-alert" style="border-color:var(--gold);background:#fffdf5">
           <div style="font-weight:700;color:var(--navy);margin-bottom:6px">🎯 Speed of Service Goals</div>
           <div style="font-size:12px;color:var(--gtxt);display:flex;gap:18px;flex-wrap:wrap">
-            <span>🚗 Lunch Window: <strong>1:20</strong> (80s)</span>
-            <span>🚗 Dinner Window: <strong>1:40</strong> (100s)</span>
-            <span>📱 Kiosk Lunch: <strong>6:00</strong> (360s)</span>
-            <span>📱 Kiosk Dinner: <strong>6:00</strong> (360s)</span>
+            <span>🚗 Breakfast Window: <strong>2:00</strong> (120s)</span>
+            <span>🚗 Lunch Window: <strong>1:10</strong> (70s)</span>
+            <span>🚗 Dinner Window: <strong>1:25</strong> (85s)</span>
+            <span>📱 Kiosk (all dayparts): <strong>6:00</strong> (360s)</span>
           </div>
         </div>
         <div class="tc"><div class="ct">Store Goal Compliance</div><table class="dt" id="tGoals"></table></div>
@@ -3477,8 +3477,8 @@ function updSOS(d,wk,dy){
   let sosMGhtml='';
   if(hasW||hasH){
     if(hasLDWin){
-      sosMGhtml+=_sosCard('🚗 Win Lunch',winLV,SOS_GOALS.winL,'1:20',true);
-      sosMGhtml+=_sosCard('🚗 Win Dinner',winDV,SOS_GOALS.winD,'1:40',true);
+      sosMGhtml+=_sosCard('🚗 Win Lunch',winLV,SOS_GOALS.winL,'1:10',true);
+      sosMGhtml+=_sosCard('🚗 Win Dinner',winDV,SOS_GOALS.winD,'1:25',true);
     } else {
       sosMGhtml+=`<div class="mc"><div class="ml">Window Time</div><div class="mv">${tF(winV)}</div><div class="ms">${dyLblSOS}</div></div>`;
     }
@@ -3567,9 +3567,9 @@ function renderSOSSub(d,wk,win,kio,winL,winD,winB,kioL,kioD,kioB,hasWL,hasWD,has
       if(hasWD)datasets.push(_line('Dinner',winD,COLOR_D,false));
     } else {
       let data=win,goalSec=null,goalLbl='',color=COLOR_L;
-      if(ld==='breakfast'&&hasWB){data=winB;goalSec=SOS_GOALS.winB;goalLbl='Goal (1:20)';color=COLOR_B;}
-      else if(ld==='lunch'&&hasWL){data=winL;goalSec=SOS_GOALS.winL;goalLbl='Goal (1:20)';color=COLOR_L;}
-      else if(ld==='dinner'&&hasWD){data=winD;goalSec=SOS_GOALS.winD;goalLbl='Goal (1:40)';color=COLOR_D;}
+      if(ld==='breakfast'&&hasWB){data=winB;goalSec=SOS_GOALS.winB;goalLbl='Goal (2:00)';color=COLOR_B;}
+      else if(ld==='lunch'&&hasWL){data=winL;goalSec=SOS_GOALS.winL;goalLbl='Goal (1:10)';color=COLOR_L;}
+      else if(ld==='dinner'&&hasWD){data=winD;goalSec=SOS_GOALS.winD;goalLbl='Goal (1:25)';color=COLOR_D;}
       datasets.push(_line('Window Time',data,color,true));
       if(goalSec)datasets.push(_goalLine(goalLbl,new Array(data.length).fill(goalSec),'#1B2A4A'));
     }
@@ -3592,6 +3592,7 @@ function renderSOSSub(d,wk,win,kio,winL,winD,winB,kioL,kioD,kioB,hasWL,hasWD,has
       if(ld==='breakfast'&&hasKB){data=kioB;goalSec=SOS_GOALS.kioB;goalLbl='Goal (6:00)';color=COLOR_B;}
       else if(ld==='lunch'&&hasKL){data=kioL;goalSec=SOS_GOALS.kioL;goalLbl='Goal (6:00)';color=COLOR_L;}
       else if(ld==='dinner'&&hasKD){data=kioD;goalSec=SOS_GOALS.kioD;goalLbl='Goal (6:00)';color=COLOR_D;}
+// (kiosk labels unchanged — 6:00 for all dayparts)
       datasets.push(_line('Kiosk Time',data,color,true));
       if(goalSec)datasets.push(_goalLine(goalLbl,new Array(data.length).fill(goalSec),'#D4A843'));
     }
@@ -3645,7 +3646,7 @@ function setSosLd(el,metric){
   renderSOSSub(d,wk,win,kio,winL,winD,winB,kioL,kioD,kioB,hasWL,hasWD,hasWB,hasKL,hasKD,hasKB);
 }
 // SOS GOAL CHECK
-const SOS_GOALS={winB:80,winL:80,winD:100,kioB:360,kioL:420,kioD:360};// DT Breakfast<1:20, DT Lunch<1:20, DT Dinner<1:40, Kiosk Breakfast<6:00, Kiosk Other<7:00, Kiosk CT/DC<6:00
+const SOS_GOALS={winB:120,winL:70,winD:85,kioB:360,kioL:360,kioD:360};// HME Window: Breakfast<2:00, Lunch<1:10, Dinner<1:25. Kiosk: all dayparts <6:00.
 function bldGoalCheck(wk){
   const pd=getPD(),rows=[];
   SS.forEach(s=>{
@@ -3682,7 +3683,7 @@ function bldGoalCheck(wk){
     return af-bf;
   });
   const badge=(pass,val,hasData)=>hasData?`<span class="gbad ${pass?'pass':'fail'}">${pass?'✓':'✗'} ${tF(val)}</span>`:'<span class="gbad na">—</span>';
-  let html=`<thead><tr><th>Store</th><th>Win Lunch <small>Goal 1:20</small></th><th>Win Dinner <small>Goal 1:40</small></th><th>Kiosk Lunch <small>Goal 6:00</small></th><th>Kiosk Dinner <small>Goal 6:00</small></th><th>Status</th></tr></thead><tbody>`;
+  let html=`<thead><tr><th>Store</th><th>Win Lunch <small>Goal 1:10</small></th><th>Win Dinner <small>Goal 1:25</small></th><th>Kiosk Lunch <small>Goal 6:00</small></th><th>Kiosk Dinner <small>Goal 6:00</small></th><th>Status</th></tr></thead><tbody>`;
   rows.forEach(r=>{
     if(r.openingSoon){
       html+=`<tr style="opacity:.6"><td class="sn">${r.name}${r.dist?`<span class="db">${r.dist}</span>`:''}</td><td colspan="4" style="color:var(--gtxt);font-style:italic">Opening soon — no data yet</td><td></td></tr>`;
@@ -4158,11 +4159,11 @@ function updOpsHub(wk,dy){
   function cH(v){return(v||v===0)&&v!==0?(v<0?'oh-g':'oh-r'):'';}        // hrs var: under=green, over=red
   function cL(v){return v>0?(v*100<=APP.goals.labor?'oh-g':'oh-r'):'';}  // labor %: ≤24%=green
   function cLV(v){return v!==null&&v!==undefined&&v!==0?(v<0?'oh-g':'oh-r'):'';} // labor var: <0=green, >0=red, =0 neutral
-  function cDTB(v){return v>0?(v<=SOS_GOALS.winB?'oh-g':'oh-r'):'';}     // DT Breakfast: <1:20=green
-  function cDTL(v){return v>0?(v<=SOS_GOALS.winL?'oh-g':'oh-r'):'';}     // DT Lunch: <1:20=green
-  function cDTD(v){return v>0?(v<=SOS_GOALS.winD?'oh-g':'oh-r'):'';}     // DT Dinner: <1:40=green
+  function cDTB(v){return v>0?(v<=SOS_GOALS.winB?'oh-g':'oh-r'):'';}     // DT Breakfast: <2:00=green
+  function cDTL(v){return v>0?(v<=SOS_GOALS.winL?'oh-g':'oh-r'):'';}     // DT Lunch: <1:10=green
+  function cDTD(v){return v>0?(v<=SOS_GOALS.winD?'oh-g':'oh-r'):'';}     // DT Dinner: <1:25=green
   function cKB(v){return v>0?(v<=SOS_GOALS.kioB?'oh-g':'oh-r'):'';}      // Kiosk Breakfast: <6:00=green
-  function cKL(v){return v>0?(v<=SOS_GOALS.kioL?'oh-g':'oh-r'):'';}      // Kiosk Other: <7:00=green
+  function cKL(v){return v>0?(v<=SOS_GOALS.kioL?'oh-g':'oh-r'):'';}      // Kiosk Lunch: <6:00=green
   function cKD(v){return v>0?(v<=SOS_GOALS.kioD?'oh-g':'oh-r'):'';}      // Kiosk CT/DC: <6:00=green
   function cAcc(v){return v>=0?(v<=APP.goals.acc?'oh-g':'oh-r'):'';}     // accuracy: <1.0=green
   function cCG(v){return!v?'':v>0?'oh-r':'oh-a';}                         // cogs: missing=red, overage=amber
