@@ -2461,7 +2461,7 @@ const CMP_DEFAULT=['acS','_sVP','aLP','alLP','aSP','_hV','cars','_acc','cgL','cg
 const CMP_COLORS=['#E8432A','#1B2A4A','#D4A843','#27AE60','#7a3d00','#4a2470','#1a6040','#c04020'];
 // Global: locs and separate apply to ALL selection rows (shared store basis)
 // Per-row: selections only hold period + week
-const CMP={selections:[],metrics:null,locs:['AllStores'],separate:false,groups:[],_initialized:false,_uid:0,_chart:null,_lastRows:null,_editingGroup:null};
+const CMP={selections:[],metrics:null,locs:['AllStores'],separate:false,_initialized:false,_uid:0,_chart:null,_lastRows:null};
 
 function _cmpNewId(){return 'sel'+(++CMP._uid)+'_'+Math.random().toString(36).slice(2,6);}
 function _cmpLoadMetrics(){
@@ -2470,13 +2470,13 @@ function _cmpLoadMetrics(){
 }
 function _cmpSaveMetrics(){try{localStorage.setItem(CMP_METRICS_KEY,JSON.stringify(CMP.metrics));}catch(e){}}
 function _cmpSaveSelections(){try{localStorage.setItem(CMP_SELS_KEY,JSON.stringify(CMP.selections));}catch(e){}}
-function _cmpSaveGlobal(){try{localStorage.setItem(CMP_GLOBAL_KEY,JSON.stringify({locs:CMP.locs,separate:CMP.separate,groups:CMP.groups}));}catch(e){}}
+function _cmpSaveGlobal(){try{localStorage.setItem(CMP_GLOBAL_KEY,JSON.stringify({locs:CMP.locs,separate:CMP.separate}));}catch(e){}}
 function _cmpLoadSelections(){
   try{const s=localStorage.getItem(CMP_SELS_KEY);if(s){const a=JSON.parse(s);if(Array.isArray(a)&&a.length){return a.map(x=>({id:x.id||_cmpNewId(),period:x.period||null,week:x.week||null}));}}}catch(e){}
   return null;
 }
 function _cmpLoadGlobal(){
-  try{const s=localStorage.getItem(CMP_GLOBAL_KEY);if(s){const o=JSON.parse(s);if(o&&Array.isArray(o.locs)&&o.locs.length)return{locs:o.locs,separate:!!o.separate,groups:Array.isArray(o.groups)?o.groups:[]};}}catch(e){}
+  try{const s=localStorage.getItem(CMP_GLOBAL_KEY);if(s){const o=JSON.parse(s);if(o&&Array.isArray(o.locs)&&o.locs.length)return{locs:o.locs,separate:!!o.separate};}}catch(e){}
   return null;
 }
 
@@ -2487,13 +2487,11 @@ function _cmpAggregateLocs(periodKey,locs){
   const pd=APP.monthly[periodKey];if(!pd||!pd.all)return null;
   if(!locs||!locs.length)return null;
   if(locs.length===1)return cmpGetData(periodKey,locs[0]);
-  // Expand any "AllStores", district, or custom group refs to concrete store keys; dedupe.
+  // Expand any "AllStores" or district refs to concrete store keys; dedupe.
   const stores=new Set();
   let useAllShortcut=false;
   locs.forEach(loc=>{
     if(loc==='AllStores'){useAllShortcut=true;return;}
-    const gr=(CMP.groups||[]).find(g=>g.id===loc);
-    if(gr){_cmpGroupMembers(gr.id).forEach(s=>{if(pd.stores&&pd.stores[s])stores.add(s);});return;}
     const di=APP.districts.find(d=>d.id===loc);
     if(di){di.stores.forEach(s=>stores.add(s));}
     else if(pd.stores&&pd.stores[loc]){stores.add(loc);}
@@ -2515,11 +2513,6 @@ function cmpGetData(periodKey,locKey){
   const pd=APP.monthly[periodKey];
   if(!pd||!pd.all)return null;
   if(locKey==='AllStores')return pd.all;
-  const gr=(CMP.groups||[]).find(g=>g.id===locKey);
-  if(gr){
-    const mems=_cmpGroupMembers(gr.id).filter(s=>pd.stores&&pd.stores[s]);
-    return mems.length?aggStores(pd,mems):null;
-  }
   const di=APP.districts.find(d=>d.id===locKey);
   if(di)return aggStores(pd,di.stores);
   return(pd.stores&&pd.stores[locKey])||null;
@@ -2586,124 +2579,12 @@ function _cmpGlobalLocPickerHTML(){
       html+=`<label><input type="checkbox" ${selSet.has(d.id)?'checked':''} onchange="cmpToggleGlobalLoc('${d.id}',this.checked)"> 📍 ${d.name}</label>`;
     });
   }
-  // ── Custom comparison groups ──
-  html+=`<div class="cmp-loc-grp" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-    <span>Comparison Groups</span>
-    <button type="button" onclick="cmpNewGroup(event)" style="font-size:11px;background:var(--gold);color:var(--navy);border:0;border-radius:4px;padding:2px 8px;font-weight:700;cursor:pointer">+ New group</button>
-  </div>`;
-  if(!(CMP.groups||[]).length){
-    html+=`<div style="font-size:11px;color:var(--gtxt);padding:4px 6px;font-style:italic">No custom groups yet. Click "+ New group" to bundle a subset of stores or districts.</div>`;
-  } else {
-    CMP.groups.forEach(g=>{
-      const count=_cmpGroupMembers(g.id).length;
-      html+=`<label style="display:flex;align-items:center;gap:6px">
-        <input type="checkbox" ${selSet.has(g.id)?'checked':''} onchange="cmpToggleGlobalLoc('${g.id}',this.checked)">
-        <span style="flex:1">👥 ${g.name||'Group'} <span style="color:var(--gtxt);font-size:10px">(${count})</span></span>
-        <button type="button" onclick="cmpEditGroup(event,'${g.id}')" title="Edit members" style="background:transparent;border:0;color:var(--gtxt);font-size:11px;cursor:pointer;padding:0 4px">edit</button>
-        <button type="button" onclick="cmpDeleteGroup(event,'${g.id}')" title="Delete group" style="background:transparent;border:0;color:#c33;font-size:13px;cursor:pointer;padding:0 4px">×</button>
-      </label>`;
-    });
-  }
   html+='<div class="cmp-loc-grp">Individual Stores</div>';
   availableStores.forEach(s=>{
     const lbl=(STNUM[s]?STNUM[s]+' ':'')+(SN[s]||s);
     html+=`<label><input type="checkbox" ${selSet.has(s)?'checked':''} onchange="cmpToggleGlobalLoc('${s}',this.checked)"> ${lbl}</label>`;
   });
   return html;
-}
-// ── Custom comparison groups ─────────────────────────────────────────────────
-function cmpNewGroup(ev){
-  if(ev){ev.preventDefault();ev.stopPropagation();}
-  const name=prompt('Name this group (e.g. "East Valley", "Top performers"):','Group '+(((CMP.groups||[]).length)+1));
-  if(name==null)return;
-  const trimmed=name.trim();if(!trimmed)return;
-  const id='grp_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,5);
-  CMP.groups=CMP.groups||[];
-  CMP.groups.push({id,name:trimmed,members:[]});
-  _cmpSaveGlobal();
-  // Immediately open the edit dialog so the user picks members
-  cmpEditGroup(null,id);
-}
-function cmpDeleteGroup(ev,gid){
-  if(ev){ev.preventDefault();ev.stopPropagation();}
-  const g=(CMP.groups||[]).find(g=>g.id===gid);if(!g)return;
-  if(!confirm(`Delete group "${g.name}"?`))return;
-  CMP.groups=CMP.groups.filter(x=>x.id!==gid);
-  CMP.locs=(CMP.locs||[]).filter(l=>l!==gid);
-  if(!CMP.locs.length)CMP.locs=['AllStores'];
-  _cmpSaveGlobal();
-  // Rebuild picker + label
-  const picker=document.getElementById('cmpGlobalLocPicker');
-  if(picker){const wasOpen=picker.classList.contains('on');picker.innerHTML=_cmpGlobalLocPickerHTML();if(wasOpen)picker.classList.add('on');}
-  const lblEl=document.getElementById('cmpGlobalLocLabel');if(lblEl)lblEl.textContent=_cmpLocsLabel(CMP.locs);
-  updCompare();_cmpReRenderChartIfOpen();
-}
-function cmpEditGroup(ev,gid){
-  if(ev){ev.preventDefault();ev.stopPropagation();}
-  const g=(CMP.groups||[]).find(g=>g.id===gid);if(!g)return;
-  CMP._editingGroup=gid;
-  // Build modal
-  let modal=document.getElementById('cmpGroupEditor');
-  if(!modal){
-    modal=document.createElement('div');modal.id='cmpGroupEditor';
-    modal.style.cssText='position:fixed;inset:0;background:rgba(15,20,35,.55);z-index:300;display:flex;align-items:center;justify-content:center;padding:20px';
-    modal.onclick=e=>{if(e.target===modal)cmpCloseGroupEditor();};
-    document.body.appendChild(modal);
-  }
-  const allStoreKeys=new Set();
-  Object.values(APP.monthly).forEach(pd=>{if(pd&&pd.stores)Object.keys(pd.stores).forEach(s=>allStoreKeys.add(s));});
-  const availableStores=SS.filter(s=>allStoreKeys.has(s));
-  const memSet=new Set(g.members||[]);
-  let body=`
-    <div style="background:#fff;border-radius:10px;max-width:520px;width:100%;max-height:85vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.3)">
-      <div style="padding:14px 18px;background:var(--navy);color:#fff;display:flex;align-items:center;gap:10px">
-        <span style="font-weight:700">👥 Edit group:</span>
-        <input id="cmpGroupName" type="text" value="${(g.name||'').replace(/"/g,'&quot;')}" style="flex:1;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);border-radius:4px;color:#fff;padding:4px 8px;font-size:13px" onchange="cmpRenameEditingGroup(this.value)">
-        <button onclick="cmpCloseGroupEditor()" style="background:transparent;border:0;color:#fff;font-size:20px;cursor:pointer">×</button>
-      </div>
-      <div style="padding:12px 18px;overflow:auto;font-size:13px">
-        <div style="font-size:11px;color:var(--gtxt);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Districts</div>`;
-  if(APP.districts.length){
-    APP.districts.forEach(d=>{
-      body+=`<label style="display:flex;align-items:center;gap:6px;padding:3px 0"><input type="checkbox" ${memSet.has(d.id)?'checked':''} onchange="cmpToggleGroupMember('${d.id}',this.checked)"> 📍 ${d.name}</label>`;
-    });
-  } else {
-    body+='<div style="font-size:11px;color:var(--gtxt);font-style:italic">No districts defined.</div>';
-  }
-  body+=`<div style="font-size:11px;color:var(--gtxt);text-transform:uppercase;letter-spacing:.5px;margin:10px 0 6px">Individual Stores</div>`;
-  availableStores.forEach(s=>{
-    const lbl=(STNUM[s]?STNUM[s]+' ':'')+(SN[s]||s);
-    body+=`<label style="display:flex;align-items:center;gap:6px;padding:3px 0"><input type="checkbox" ${memSet.has(s)?'checked':''} onchange="cmpToggleGroupMember('${s}',this.checked)"> ${lbl}</label>`;
-  });
-  body+=`</div>
-      <div style="padding:10px 18px;border-top:1px solid var(--bdr);display:flex;justify-content:flex-end;gap:8px">
-        <button onclick="cmpCloseGroupEditor()" style="background:var(--gold);color:var(--navy);border:0;border-radius:4px;padding:6px 14px;font-weight:700;cursor:pointer">Done</button>
-      </div>
-    </div>`;
-  modal.innerHTML=body;
-  modal.style.display='flex';
-}
-function cmpCloseGroupEditor(){
-  const modal=document.getElementById('cmpGroupEditor');if(modal)modal.style.display='none';
-  CMP._editingGroup=null;
-  // Rebuild picker so member counts refresh
-  const picker=document.getElementById('cmpGlobalLocPicker');
-  if(picker){const wasOpen=picker.classList.contains('on');picker.innerHTML=_cmpGlobalLocPickerHTML();if(wasOpen)picker.classList.add('on');}
-  const lblEl=document.getElementById('cmpGlobalLocLabel');if(lblEl)lblEl.textContent=_cmpLocsLabel(CMP.locs);
-  updCompare();_cmpReRenderChartIfOpen();
-}
-function cmpToggleGroupMember(memberKey,checked){
-  const g=(CMP.groups||[]).find(g=>g.id===CMP._editingGroup);if(!g)return;
-  g.members=g.members||[];
-  if(checked){if(!g.members.includes(memberKey))g.members.push(memberKey);}
-  else g.members=g.members.filter(m=>m!==memberKey);
-  _cmpSaveGlobal();
-}
-function cmpRenameEditingGroup(name){
-  const g=(CMP.groups||[]).find(g=>g.id===CMP._editingGroup);if(!g)return;
-  const trimmed=(name||'').trim();
-  if(trimmed)g.name=trimmed;
-  _cmpSaveGlobal();
 }
 // Generic scoped "select all" — scope is 'districts' or 'stores'.
 // Checking adds every entry in that scope and drops the AllStores aggregate;
@@ -2794,8 +2675,6 @@ function _cmpLocsLabel(locs){
   if(locs.length===1){
     const loc=locs[0];
     if(loc==='AllStores')return 'All Stores';
-    const gr=(CMP.groups||[]).find(g=>g.id===loc);
-    if(gr)return '👥 '+(gr.name||'Group');
     const di=APP.districts.find(d=>d.id===loc);
     if(di)return '📍 '+di.name;
     return(SN[loc]||loc)+(STNUM[loc]?' ('+STNUM[loc]+')':'');
@@ -2815,8 +2694,6 @@ function _cmpLocsLabel(locs){
   // Otherwise: count + first few names
   const names=locs.map(l=>{
     if(l==='AllStores')return 'All';
-    const gr=(CMP.groups||[]).find(g=>g.id===l);
-    if(gr)return gr.name||'Group';
     const di=APP.districts.find(d=>d.id===l);
     if(di)return di.name;
     return SN[l]||l;
@@ -2962,8 +2839,8 @@ function initCompare(){
   if(!Object.keys(APP.monthly).length)return;
   // Load global stores/separate state
   const gl=_cmpLoadGlobal();
-  if(gl){CMP.locs=gl.locs;CMP.separate=gl.separate;CMP.groups=Array.isArray(gl.groups)?gl.groups:[];}
-  else {CMP.locs=[APP.loc||'AllStores'];CMP.separate=false;CMP.groups=[];}
+  if(gl){CMP.locs=gl.locs;CMP.separate=gl.separate;}
+  else {CMP.locs=[APP.loc||'AllStores'];CMP.separate=false;}
   // Load per-row selections (may also need legacy migration from when stores/separate
   // were per-row)
   let loaded=_cmpLoadSelections();
@@ -3072,24 +2949,9 @@ function _cmpCompute(d,wk,mk){
 // Display label for location code
 function _cmpLocLabel(locKey){
   if(locKey==='AllStores')return 'All Stores';
-  const gr=(CMP.groups||[]).find(g=>g.id===locKey);
-  if(gr)return gr.name||'Group';
   const di=APP.districts.find(d=>d.id===locKey);
   if(di)return di.name;
   return(SN[locKey]||locKey)+(STNUM[locKey]?' ('+STNUM[locKey]+')':'');
-}
-// Expand a group id to its concrete store keys (recursing into nested districts).
-function _cmpGroupMembers(gid){
-  const gr=(CMP.groups||[]).find(g=>g.id===gid);
-  if(!gr||!Array.isArray(gr.members))return [];
-  const out=new Set();
-  gr.members.forEach(m=>{
-    if(m==='AllStores'){SS.forEach(s=>out.add(s));return;}
-    const di=APP.districts.find(d=>d.id===m);
-    if(di){di.stores.forEach(s=>out.add(s));return;}
-    if(SS.includes(m))out.add(m);
-  });
-  return Array.from(out);
 }
 function _cmpWeekLabel(wk){return wk==='_period'?'Period Summary':wk;}
 
