@@ -865,6 +865,7 @@ const EXPORT_METRICS=[
   {k:'winB', label:'Window Time Breakfast',    cat:'SOS',      fmt:'time'},
   {k:'winL', label:'Window Time Lunch',        cat:'SOS',      fmt:'time'},
   {k:'winD', label:'Window Time Dinner',       cat:'SOS',      fmt:'time'},
+  {k:'hme',  label:'HME Time (Total DT)',      cat:'SOS',      fmt:'time'},
   {k:'cars', label:'Total Cars',               cat:'SOS',      fmt:'0'},
   {k:'kio',  label:'Kiosk Time (All)',         cat:'SOS',      fmt:'time'},
   {k:'kioB', label:'Kiosk Time Breakfast',     cat:'SOS',      fmt:'time'},
@@ -3012,7 +3013,7 @@ function _cmpColValue(col,mk){
 }
 
 // Metrics where lower values are "better" (less labor %, faster SOS, fewer complaints)
-const _CMP_LOWER_BETTER=new Set(['aLP','pLP','alLP','plLP','_acc','win','winL','winD','winB','kio','kioL','kioD','kioB','comp','wgV']);
+const _CMP_LOWER_BETTER=new Set(['aLP','pLP','alLP','plLP','_acc','win','winL','winD','winB','hme','kio','kioL','kioD','kioB','comp','wgV']);
 
 // Render the comparison table — N columns + (Δ when 2 cols) or color-coded cells (when 3+ cols)
 function updCompare(){
