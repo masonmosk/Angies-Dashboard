@@ -766,14 +766,10 @@ input[type=file]{display:none}
         </div>
       </div>
       <!-- Global stores selector — applies to ALL comparison rows below -->
-      <div class="cmp-stores-bar">
+      <div class="cmp-stores-bar" id="cmpStoresBar">
         <div class="cmp-stores-label">Stores to compare:</div>
-        <div class="cmp-stores-picker-wrap">
-          <button class="cmp-loc-btn" onclick="cmpToggleGlobalLocPicker(event)" type="button" id="cmpGlobalLocBtn">
-            <span id="cmpGlobalLocLabel">All Stores</span><span class="cmp-loc-caret">▼</span>
-          </button>
-          <div class="cmp-loc-picker" id="cmpGlobalLocPicker"></div>
-        </div>
+        <div id="cmpStoreGroups" style="display:flex;flex-wrap:wrap;gap:8px;flex:1"></div>
+        <button class="bp" type="button" onclick="cmpAddStoreGroup()" id="cmpAddGroupBtn" style="background:var(--gold);color:var(--navy);font-weight:700">+ Add group</button>
         <label class="cmp-row-sep" title="Split each comparison row into a column per store. Only applies when multiple stores or a district is selected.">
           <input type="checkbox" id="cmpGlobalSeparate" onchange="cmpUpdGlobalSeparate(this.checked)">
           Show stores separately
@@ -2461,7 +2457,20 @@ const CMP_DEFAULT=['acS','_sVP','aLP','alLP','aSP','_hV','cars','_acc','cgL','cg
 const CMP_COLORS=['#E8432A','#1B2A4A','#D4A843','#27AE60','#7a3d00','#4a2470','#1a6040','#c04020'];
 // Global: locs and separate apply to ALL selection rows (shared store basis)
 // Per-row: selections only hold period + week
-const CMP={selections:[],metrics:null,locs:['AllStores'],separate:false,_initialized:false,_uid:0,_chart:null,_lastRows:null};
+const CMP={selections:[],metrics:null,locs:['AllStores'],locGroups:[],separate:false,_initialized:false,_uid:0,_chart:null,_lastRows:null};
+// Returns every group of stores currently configured.  Group 0 lives in CMP.locs
+// (existing single-picker behaviour) so saved data stays backward-compatible.
+// Groups 1..N are extra pickers the user added via "+ Add another group".
+function _cmpAllGroups(){return [CMP.locs&&CMP.locs.length?CMP.locs:['AllStores'], ...(CMP.locGroups||[])];}
+function _cmpGetGroup(gIdx){
+  if(gIdx===0)return CMP.locs&&CMP.locs.length?CMP.locs:['AllStores'];
+  return (CMP.locGroups||[])[gIdx-1]||['AllStores'];
+}
+function _cmpSetGroup(gIdx,arr){
+  const v=arr&&arr.length?arr:['AllStores'];
+  if(gIdx===0){CMP.locs=v;}
+  else {CMP.locGroups=CMP.locGroups||[];CMP.locGroups[gIdx-1]=v;}
+}
 
 function _cmpNewId(){return 'sel'+(++CMP._uid)+'_'+Math.random().toString(36).slice(2,6);}
 function _cmpLoadMetrics(){
@@ -2470,13 +2479,13 @@ function _cmpLoadMetrics(){
 }
 function _cmpSaveMetrics(){try{localStorage.setItem(CMP_METRICS_KEY,JSON.stringify(CMP.metrics));}catch(e){}}
 function _cmpSaveSelections(){try{localStorage.setItem(CMP_SELS_KEY,JSON.stringify(CMP.selections));}catch(e){}}
-function _cmpSaveGlobal(){try{localStorage.setItem(CMP_GLOBAL_KEY,JSON.stringify({locs:CMP.locs,separate:CMP.separate}));}catch(e){}}
+function _cmpSaveGlobal(){try{localStorage.setItem(CMP_GLOBAL_KEY,JSON.stringify({locs:CMP.locs,locGroups:CMP.locGroups||[],separate:CMP.separate}));}catch(e){}}
 function _cmpLoadSelections(){
   try{const s=localStorage.getItem(CMP_SELS_KEY);if(s){const a=JSON.parse(s);if(Array.isArray(a)&&a.length){return a.map(x=>({id:x.id||_cmpNewId(),period:x.period||null,week:x.week||null}));}}}catch(e){}
   return null;
 }
 function _cmpLoadGlobal(){
-  try{const s=localStorage.getItem(CMP_GLOBAL_KEY);if(s){const o=JSON.parse(s);if(o&&Array.isArray(o.locs)&&o.locs.length)return{locs:o.locs,separate:!!o.separate};}}catch(e){}
+  try{const s=localStorage.getItem(CMP_GLOBAL_KEY);if(s){const o=JSON.parse(s);if(o&&Array.isArray(o.locs)&&o.locs.length)return{locs:o.locs,locGroups:Array.isArray(o.locGroups)?o.locGroups.filter(g=>Array.isArray(g)&&g.length):[],separate:!!o.separate};}}catch(e){}
   return null;
 }
 
@@ -2544,57 +2553,67 @@ function _cmpRenderSelectionRow(sel,idx){
   </div>`;
 }
 
-// ── Global stores picker (shared across all comparison rows) ──
+// ── Global stores picker(s) — one per group, shared across comparison rows ──
 function _cmpRenderGlobalLoc(){
-  const lblEl=document.getElementById('cmpGlobalLocLabel');if(!lblEl)return;
-  lblEl.textContent=_cmpLocsLabel(CMP.locs);
   const sepEl=document.getElementById('cmpGlobalSeparate');if(sepEl)sepEl.checked=!!CMP.separate;
-  // Build the picker HTML once per period set (cheap to rebuild on each call)
-  const picker=document.getElementById('cmpGlobalLocPicker');if(!picker)return;
-  const wasOpen=picker.classList.contains('on');
-  picker.innerHTML=_cmpGlobalLocPickerHTML();
-  if(wasOpen)picker.classList.add('on');
+  const host=document.getElementById('cmpStoreGroups');if(!host)return;
+  const groups=_cmpAllGroups();
+  // Preserve which pickers were open across re-renders so toggling a checkbox
+  // (which rebuilds the row) doesn't snap the dropdown shut.
+  const wasOpen=new Set();
+  host.querySelectorAll('.cmp-loc-picker.on').forEach(p=>{
+    const idx=p.getAttribute('data-gidx');if(idx!=null)wasOpen.add(idx);
+  });
+  host.innerHTML=groups.map((g,i)=>{
+    const label=_cmpLocsLabel(g);
+    const removeBtn=i>0?`<button type="button" onclick="cmpRemoveStoreGroup(event,${i})" title="Remove this group" style="background:transparent;border:0;color:#c33;font-size:18px;cursor:pointer;padding:0 4px;line-height:1">×</button>`:'';
+    return `<div class="cmp-stores-picker-wrap" data-gidx="${i}" style="position:relative;flex:1;min-width:200px;max-width:360px;display:flex;align-items:center;gap:4px">
+      <button class="cmp-loc-btn" onclick="cmpToggleGlobalLocPicker(event,${i})" type="button" data-gidx="${i}" style="flex:1">
+        <span>${label}</span><span class="cmp-loc-caret">▼</span>
+      </button>
+      ${removeBtn}
+      <div class="cmp-loc-picker${wasOpen.has(String(i))?' on':''}" data-gidx="${i}">${_cmpGlobalLocPickerHTML(i)}</div>
+    </div>`;
+  }).join('');
 }
-function _cmpGlobalLocPickerHTML(){
-  const selSet=new Set(CMP.locs||[]);
-  // Aggregate which stores are available across ALL loaded periods
+function _cmpGlobalLocPickerHTML(gIdx){
+  gIdx=gIdx||0;
+  const groupArr=_cmpGetGroup(gIdx);
+  const selSet=new Set(groupArr);
   const allStoreKeys=new Set();
   Object.values(APP.monthly).forEach(pd=>{if(pd&&pd.stores)Object.keys(pd.stores).forEach(s=>allStoreKeys.add(s));});
   const availableStores=SS.filter(s=>allStoreKeys.has(s));
   const allStoresSelected=availableStores.length>0&&availableStores.every(s=>selSet.has(s));
   const allDistrictsSelected=APP.districts.length>0&&APP.districts.every(d=>selSet.has(d.id));
   let html='';
-  // Two scoped "select all" toggles so the user can pull every store OR every district
   if(APP.districts.length){
     html+=`<label style="font-weight:700;border-bottom:1px solid var(--bdr);padding-bottom:6px;margin-bottom:4px;display:flex;align-items:center;gap:6px">
-      <input type="checkbox" ${allDistrictsSelected?'checked':''} onchange="cmpSelectAllScope('districts',this.checked)"> Select all districts
+      <input type="checkbox" ${allDistrictsSelected?'checked':''} onchange="cmpSelectAllScope('districts',this.checked,${gIdx})"> Select all districts
     </label>`;
   }
   html+=`<label style="font-weight:700;border-bottom:1px solid var(--bdr);padding-bottom:6px;margin-bottom:4px;display:flex;align-items:center;gap:6px">
-    <input type="checkbox" ${allStoresSelected?'checked':''} onchange="cmpSelectAllScope('stores',this.checked)"> Select all stores
+    <input type="checkbox" ${allStoresSelected?'checked':''} onchange="cmpSelectAllScope('stores',this.checked,${gIdx})"> Select all stores
   </label>`;
   if(APP.districts.length){
     html+='<div class="cmp-loc-grp">Districts</div>';
     APP.districts.forEach(d=>{
-      html+=`<label><input type="checkbox" ${selSet.has(d.id)?'checked':''} onchange="cmpToggleGlobalLoc('${d.id}',this.checked)"> 📍 ${d.name}</label>`;
+      html+=`<label><input type="checkbox" ${selSet.has(d.id)?'checked':''} onchange="cmpToggleGlobalLoc('${d.id}',this.checked,${gIdx})"> 📍 ${d.name}</label>`;
     });
   }
   html+='<div class="cmp-loc-grp">Individual Stores</div>';
   availableStores.forEach(s=>{
     const lbl=(STNUM[s]?STNUM[s]+' ':'')+(SN[s]||s);
-    html+=`<label><input type="checkbox" ${selSet.has(s)?'checked':''} onchange="cmpToggleGlobalLoc('${s}',this.checked)"> ${lbl}</label>`;
+    html+=`<label><input type="checkbox" ${selSet.has(s)?'checked':''} onchange="cmpToggleGlobalLoc('${s}',this.checked,${gIdx})"> ${lbl}</label>`;
   });
   return html;
 }
-// Generic scoped "select all" — scope is 'districts' or 'stores'.
-// Checking adds every entry in that scope and drops the AllStores aggregate;
-// unchecking clears just that scope (other scope's selections remain).
-function cmpSelectAllScope(scope,checked){
+function cmpSelectAllScope(scope,checked,gIdx){
+  gIdx=gIdx||0;
   const allStoreKeys=new Set();
   Object.values(APP.monthly).forEach(pd=>{if(pd&&pd.stores)Object.keys(pd.stores).forEach(s=>allStoreKeys.add(s));});
   const availableStores=SS.filter(s=>allStoreKeys.has(s));
   const districtIds=APP.districts.map(d=>d.id);
-  let locs=(CMP.locs||[]).filter(l=>l!=='AllStores');
+  let locs=_cmpGetGroup(gIdx).filter(l=>l!=='AllStores');
   if(scope==='districts'){
     locs=locs.filter(l=>!districtIds.includes(l));
     if(checked)locs=locs.concat(districtIds);
@@ -2602,35 +2621,51 @@ function cmpSelectAllScope(scope,checked){
     locs=locs.filter(l=>!availableStores.includes(l));
     if(checked)locs=locs.concat(availableStores);
   }
-  CMP.locs=locs.length?locs:['AllStores'];
+  _cmpSetGroup(gIdx,locs);
   _cmpSaveGlobal();
-  // Rebuild the picker so other checkboxes update, but keep it OPEN
-  const picker=document.getElementById('cmpGlobalLocPicker');
-  if(picker){const wasOpen=picker.classList.contains('on');picker.innerHTML=_cmpGlobalLocPickerHTML();if(wasOpen)picker.classList.add('on');}
-  const lblEl=document.getElementById('cmpGlobalLocLabel');if(lblEl)lblEl.textContent=_cmpLocsLabel(CMP.locs);
+  _cmpRenderGlobalLoc();
   updCompare();_cmpReRenderChartIfOpen();
 }
-// Back-compat alias in case anything else references the old name
-function cmpSelectAllStores(checked){cmpSelectAllScope('stores',checked);}
-function cmpToggleGlobalLocPicker(ev){
+function cmpSelectAllStores(checked){cmpSelectAllScope('stores',checked,0);}
+function cmpToggleGlobalLocPicker(ev,gIdx){
   if(ev)ev.stopPropagation();
-  // Close any per-row pickers (legacy) and toggle global
-  document.querySelectorAll('.cmp-loc-picker').forEach(p=>{if(p.id!=='cmpGlobalLocPicker')p.classList.remove('on');});
-  const p=document.getElementById('cmpGlobalLocPicker');if(p)p.classList.toggle('on');
+  gIdx=gIdx||0;
+  const host=document.getElementById('cmpStoreGroups');if(!host)return;
+  host.querySelectorAll('.cmp-loc-picker').forEach(p=>{
+    const idx=p.getAttribute('data-gidx');
+    if(idx===String(gIdx))p.classList.toggle('on');
+    else p.classList.remove('on');
+  });
 }
-function cmpToggleGlobalLoc(loc,checked){
+function cmpToggleGlobalLoc(loc,checked,gIdx){
+  gIdx=gIdx||0;
+  let arr=_cmpGetGroup(gIdx).slice();
   if(checked){
-    if(!CMP.locs.includes(loc))CMP.locs.push(loc);
-    // Picking a specific district/store drops the "All Stores" aggregate
-    // so the label/data reflects exactly what's checked.
-    if(loc!=='AllStores')CMP.locs=CMP.locs.filter(l=>l!=='AllStores');
+    if(!arr.includes(loc))arr.push(loc);
+    if(loc!=='AllStores')arr=arr.filter(l=>l!=='AllStores');
   } else {
-    CMP.locs=CMP.locs.filter(l=>l!==loc);
+    arr=arr.filter(l=>l!==loc);
   }
-  if(!CMP.locs.length)CMP.locs=['AllStores']; // never empty
+  _cmpSetGroup(gIdx,arr);
   _cmpSaveGlobal();
-  // Update only the label (don't rebuild the picker so it stays open)
-  const lblEl=document.getElementById('cmpGlobalLocLabel');if(lblEl)lblEl.textContent=_cmpLocsLabel(CMP.locs);
+  // Update just the button label for this group (keep the dropdown open)
+  const btn=document.querySelector(`#cmpStoreGroups .cmp-loc-btn[data-gidx="${gIdx}"] span:first-child`);
+  if(btn)btn.textContent=_cmpLocsLabel(_cmpGetGroup(gIdx));
+  updCompare();_cmpReRenderChartIfOpen();
+}
+function cmpAddStoreGroup(){
+  CMP.locGroups=CMP.locGroups||[];
+  CMP.locGroups.push(['AllStores']);
+  _cmpSaveGlobal();
+  _cmpRenderGlobalLoc();
+  updCompare();_cmpReRenderChartIfOpen();
+}
+function cmpRemoveStoreGroup(ev,gIdx){
+  if(ev){ev.preventDefault();ev.stopPropagation();}
+  if(gIdx<1)return; // can't remove the primary group
+  CMP.locGroups.splice(gIdx-1,1);
+  _cmpSaveGlobal();
+  _cmpRenderGlobalLoc();
   updCompare();_cmpReRenderChartIfOpen();
 }
 function cmpUpdGlobalSeparate(checked){
@@ -2839,8 +2874,8 @@ function initCompare(){
   if(!Object.keys(APP.monthly).length)return;
   // Load global stores/separate state
   const gl=_cmpLoadGlobal();
-  if(gl){CMP.locs=gl.locs;CMP.separate=gl.separate;}
-  else {CMP.locs=[APP.loc||'AllStores'];CMP.separate=false;}
+  if(gl){CMP.locs=gl.locs;CMP.locGroups=gl.locGroups||[];CMP.separate=gl.separate;}
+  else {CMP.locs=[APP.loc||'AllStores'];CMP.locGroups=[];CMP.separate=false;}
   // Load per-row selections (may also need legacy migration from when stores/separate
   // were per-row)
   let loaded=_cmpLoadSelections();
@@ -2961,13 +2996,29 @@ function _cmpWeekLabel(wk){return wk==='_period'?'Period Summary':wk;}
 // CMP.separate=true  → each row produces N columns, one per individual location
 function _cmpExpandColumns(){
   const cols=[];
-  const globalLocs=(CMP.locs&&CMP.locs.length)?CMP.locs:['AllStores'];
+  const groups=_cmpAllGroups();
+  // With >1 group we always render one column per (selection, group) pair so
+  // the user can directly compare Group 1 vs Group 2 vs Group 3.
+  if(groups.length>1){
+    groups.forEach((g,gIdx)=>{
+      const accent=CMP_COLORS[gIdx%CMP_COLORS.length];
+      const grpLabel=_cmpLocsLabel(g);
+      CMP.selections.forEach((sel,selIdx)=>{
+        cols.push({
+          selId:sel.id,selIdx,accent,period:sel.period,week:sel.week,
+          locs:g.slice(),storeKey:'grp_'+gIdx,grpIdx:gIdx,grpLabel,
+          header:_cmpHeaderLabel(sel,g,selIdx,false)+' · '+grpLabel
+        });
+      });
+    });
+    return cols;
+  }
+  // Single group — keep the legacy behaviour exactly.
+  const globalLocs=groups[0];
   const separate=!!CMP.separate&&globalLocs.length>1;
   if(separate){
     // Group columns BY STORE so each store's set of week columns sits together —
     // easier to scan a single store's trend across weeks at a glance.
-    // Color accent goes by STORE (not selection) in this mode so each store's
-    // group is visually unified.
     globalLocs.forEach((loc,storeIdx)=>{
       const storeAccent=CMP_COLORS[storeIdx%CMP_COLORS.length];
       CMP.selections.forEach((sel,selIdx)=>{
@@ -3121,11 +3172,41 @@ function _cmpRenderChart(){
   document.getElementById('cmpChartTitle').textContent=`${m.cat} — ${m.label}`;
   if(CMP._chart){try{CMP._chart.destroy();}catch(e){}CMP._chart=null;}
   const canvas=document.getElementById('cmpChartCanvas');if(!canvas)return;
-  const globalLocs=(CMP.locs&&CMP.locs.length)?CMP.locs:['AllStores'];
-  const separate=!!CMP.separate&&globalLocs.length>1;
+  const allGroups=_cmpAllGroups();
+  const globalLocs=allGroups[0];
+  const multiGroup=allGroups.length>1;
+  const separate=!multiGroup&&!!CMP.separate&&globalLocs.length>1;
 
   let chartData,chartOptions;
-  if(separate){
+  if(multiGroup){
+    // ── Multi-group mode: one line per group, x-axis = selections ──
+    // Each group's stores are aggregated together, so the user sees Group 1
+    // vs Group 2 (vs Group 3…) trended across the chosen weeks.
+    const labels=CMP.selections.map((s,i)=>_cmpSelOnlyHeader(s,i));
+    const datasets=allGroups.map((grp,gIdx)=>{
+      const color=CMP_COLORS[gIdx%CMP_COLORS.length];
+      const data=CMP.selections.map(s=>{
+        const d=_cmpAggregateLocs(s.period,grp);
+        if(!d)return null;
+        const v=_cmpCompute(d,s.week,mk);
+        return(v==null||isNaN(v))?null:v*scale;
+      });
+      return{label:_cmpLocsLabel(grp),data,borderColor:color,backgroundColor:color+'22',pointBackgroundColor:color,pointBorderColor:'#fff',pointBorderWidth:2,pointRadius:6,pointHoverRadius:8,borderWidth:2.5,fill:false,tension:.25,spanGaps:true};
+    });
+    chartData={labels,datasets};
+    chartOptions={
+      responsive:true,maintainAspectRatio:false,
+      plugins:{
+        legend:{position:'bottom',labels:{boxWidth:14,padding:10,font:{size:11}}},
+        tooltip:{callbacks:{label:c=>c.dataset.label+': '+tooltipFmt(c.raw||0)}}
+      },
+      scales:{
+        x:{ticks:{font:{size:11},maxRotation:25,minRotation:0,autoSkip:false}},
+        y:{beginAtZero:false,grace:'8%',ticks:{callback:v=>{if(unit==='$')return'$'+(v>=1000?Math.round(v/1000)+'k':v);if(unit==='%')return v.toFixed(1)+'%';if(unit==='s')return tF(v);return v;}}}
+      },
+      layout:{padding:{top:28,right:8}}
+    };
+  } else if(separate){
     // ── Separate mode: one line per store ──
     // X-axis = selections (week comparisons); each store gets its own colored line
     // so trends per store are immediately distinguishable instead of zig-zagging.
