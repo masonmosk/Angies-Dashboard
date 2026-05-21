@@ -676,6 +676,19 @@ input[type=file]{display:none}
           <div class="cc sp2"><div class="ct">Window Time — Daily (seconds)</div><div class="cw"><canvas id="cWN"></canvas></div></div>
         </div>
       </div>
+      <!-- Menu section -->
+      <div class="sos-sub" id="sos-menu">
+        <div class="ld-sub-tabs">
+          <div class="ld-tab on" data-ld="all" data-metric="menu" onclick="setSosLd(this,'menu')">All Day</div>
+          <div class="ld-tab" data-ld="dayparts" data-metric="menu" onclick="setSosLd(this,'menu')">B+L+D</div>
+          <div class="ld-tab" data-ld="breakfast" data-metric="menu" onclick="setSosLd(this,'menu')">Breakfast</div>
+          <div class="ld-tab" data-ld="lunch" data-metric="menu" onclick="setSosLd(this,'menu')">Lunch</div>
+          <div class="ld-tab" data-ld="dinner" data-metric="menu" onclick="setSosLd(this,'menu')">Dinner</div>
+        </div>
+        <div class="cg2">
+          <div class="cc sp2"><div class="ct">Menu Time — Daily (seconds)</div><div class="cw"><canvas id="cMN"></canvas></div></div>
+        </div>
+      </div>
       <!-- Kiosk section -->
       <div class="sos-sub" id="sos-kio">
         <div class="ld-sub-tabs">
@@ -809,7 +822,7 @@ input[type=file]{display:none}
 </div>
 
 <script>
-const APP={monthly:{},labels:{},districts:[],period:null,week:null,day:'all',loc:'AllStores',sosSub:'win',sosLd:{win:'all',kio:'all'},goals:{labor:24,salesVar:-5,sos:120,acc:1.0},_expMetrics:null,tblSort:{},autoExport:{enabled:false,profiles:[]},_ohSub:0,_scSk:null};
+const APP={monthly:{},labels:{},districts:[],period:null,week:null,day:'all',loc:'AllStores',sosSub:'win',sosLd:{win:'all',kio:'all',menu:'all'},goals:{labor:24,salesVar:-5,sos:120,acc:1.0},_expMetrics:null,tblSort:{},autoExport:{enabled:false,profiles:[]},_ohSub:0,_scSk:null};
 let CH={};
 const DAYS=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 const SS=['Baseline','Signal','QC','Ray','Pinnacle','Central','LoneCactus','Tbird','Litchfield','83rd','Peoria','Jackrabbit','Wilmot1','Alvernon','Wilmot2','Marketplace','Copper','Milton','BlueDiamond','Prescott','Alma','PowerRay'];
@@ -867,6 +880,10 @@ const EXPORT_METRICS=[
   {k:'kioB', label:'Kiosk Time Breakfast',     cat:'SOS',      fmt:'time'},
   {k:'kioL', label:'Kiosk Time Lunch',         cat:'SOS',      fmt:'time'},
   {k:'kioD', label:'Kiosk Time Dinner',        cat:'SOS',      fmt:'time'},
+  {k:'menu', label:'Menu Time (All)',          cat:'SOS',      fmt:'time'},
+  {k:'menuB',label:'Menu Time Breakfast',      cat:'SOS',      fmt:'time'},
+  {k:'menuL',label:'Menu Time Lunch',          cat:'SOS',      fmt:'time'},
+  {k:'menuD',label:'Menu Time Dinner',         cat:'SOS',      fmt:'time'},
   // ── Accuracy (end of Other Metrics) ──
   {k:'comp', label:'Accuracy Complaints',      cat:'Accuracy', fmt:'0'},
   {k:'txns', label:'Transactions',             cat:'Accuracy', fmt:'0'},
@@ -886,7 +903,7 @@ function stNm(sk){const num=STNUM[sk];const nm=SN[sk]||sk;return(num?`<span styl
 const STORE_META_KEY='angies_store_meta';
 const _ORIGINAL_SS=new Set(['Baseline','Signal','QC','Ray','Pinnacle','Central','LoneCactus','Tbird','Litchfield','83rd','Peoria','Jackrabbit','Wilmot1','Alvernon','Wilmot2','Marketplace','Copper','Milton','BlueDiamond','Prescott','Alma','PowerRay']);
 // Sheet tab names that are NEVER stores (workbook utility sheets)
-const _RESERVED_SHEETS=new Set(['allstores','bonus','window','kiosk','donations','actuallabor','hme','toastgroupsales','toastaccounting','zendesk','projections','toastkiosk','scheduledlabor','mc','qb25','qb26','oracle','store list','labormodel','accuracy','compstores','instructions','avt$','sheet1','sheet2','1','2','donations (2)','comp stores']);
+const _RESERVED_SHEETS=new Set(['allstores','bonus','window','kiosk','menu','donations','actuallabor','hme','toastgroupsales','toastaccounting','zendesk','projections','toastkiosk','scheduledlabor','mc','qb25','qb26','oracle','store list','labormodel','accuracy','compstores','instructions','avt$','sheet1','sheet2','1','2','donations (2)','comp stores']);
 
 function _saveStoreMeta(){
   try{
@@ -1750,12 +1767,14 @@ function parseWB(wb,filenameHint){
   }
   if(wb.SheetNames.includes('Window'))_applySOS('Window','winL','winD','winB');
   if(wb.SheetNames.includes('Kiosk'))_applySOS('Kiosk','kioL','kioD','kioB');
+  if(wb.SheetNames.includes('Menu'))_applySOS('Menu','menuL','menuD','menuB');
 
   // Attach metadata for confirmation banner
   res.storeCount=Object.keys(res.stores).length;
   res.missingSOSSheets=[];
   if(!wb.SheetNames.includes('Window'))res.missingSOSSheets.push('Window');
   if(!wb.SheetNames.includes('Kiosk'))res.missingSOSSheets.push('Kiosk');
+  if(!wb.SheetNames.includes('Menu'))res.missingSOSSheets.push('Menu');
   res.missingStoreSheets=SS.filter(s=>s!=='PowerRay'&&!wb.SheetNames.includes(s)&&!(_aliasRev[s]&&wb.SheetNames.includes(_aliasRev[s])));
 
   return res;
@@ -1796,15 +1815,17 @@ function parseSheet(wb,name){
     'Ideal Hours':'idH',
     'Needed To Cut/Add  (-/+)':'needH','Needed To Cut/Add (-/+)':'needH',
     'Needed to Cut/Add  (-/+)':'needH','Needed to Cut/Add (-/+)':'needH',
-    'Window Time':'win','HME Time':'hme','Total Cars':'cars','Kiosk Fulfillment Time':'kio',
+    'Window Time':'win','HME Time':'hme','Total Cars':'cars','Kiosk Fulfillment Time':'kio','Menu Time':'menu',
     'Window Time Lunch':'winL','Window Time Dinner':'winD','Window Time Breakfast':'winB',
     'Kiosk Fulfillment Time Lunch':'kioL','Kiosk Fulfillment Time Dinner':'kioD','Kiosk Fulfillment Time Breakfast':'kioB',
+    'Menu Time Lunch':'menuL','Menu Time Dinner':'menuD','Menu Time Breakfast':'menuB',
     'Lunch Window Time':'winL','Dinner Window Time':'winD','Breakfast Window Time':'winB',
     'Lunch Kiosk Time':'kioL','Dinner Kiosk Time':'kioD','Breakfast Kiosk Time':'kioB',
+    'Lunch Menu Time':'menuL','Dinner Menu Time':'menuD','Breakfast Menu Time':'menuB',
     'Accuracy Complaints':'comp','Transactions':'txns','WTD Accuracy/1000':'acc1k',
     'Lobster':'cgL','Chicken':'cgC','Steak':'cgS','Cheeses':'cgCh','Cheese':'cgCh',
     'Lobster Variance':'cgL','Chicken Variance':'cgC','Steak Variance':'cgS','Cheeses Variance':'cgCh','Cheese Variance':'cgCh'};
-  const TM=new Set(['win','hme','kio','winL','winD','winB','kioL','kioD','kioB']);
+  const TM=new Set(['win','hme','kio','winL','winD','winB','kioL','kioD','kioB','menu','menuL','menuD','menuB']);
   const CM=new Set(['cgL','cgC','cgS','cgCh']);
   // Normalized MM map for fuzzy label matching (fallback when exact match fails)
   function _normLbl(s){return s.toLowerCase().replace(/\s+/g,' ').replace(/\bhrs\b/g,'hours').replace(/\bsched\b/g,'scheduled').replace(/\bact\b/g,'actual').replace(/\bproj\b/g,'projected').replace(/\bexcl\b\.?/g,'excl.').replace(/\bincl\b\.?/g,'incl.').replace(/\bvar\b/g,'variance').trim();}
@@ -2207,7 +2228,7 @@ function aggStores(pd,keys){
   const first=pd.stores[valid[0]];
   // Use RATE_MK for averaging — all other metrics (hours, counts, $) are summed
   // RATE_MK may not be defined yet at parse time so fall back to a safe set
-  const AVG=typeof RATE_MK!=='undefined'?RATE_MK:new Set(['pLP','aLP','plLP','alLP','pSP','aSP','nsoLP','regLP','wgV','win','hme','kio','winL','winD','winB','kioL','kioD','kioB']);
+  const AVG=typeof RATE_MK!=='undefined'?RATE_MK:new Set(['pLP','aLP','plLP','alLP','pSP','aSP','nsoLP','regLP','wgV','win','hme','kio','winL','winD','winB','kioL','kioD','kioB','menu','menuL','menuD','menuB']);
   // Detect whether the caller asked for ALL stores in the period (= true AllStores
   // aggregation, not a district subset). For full-AllStores rollups we should
   // trust the parsed AllStores sheet whenever it has data, because individual
@@ -2247,7 +2268,7 @@ function aggStores(pd,keys){
 }
 
 // Metrics that should be averaged (not summed) across days
-const RATE_MK=new Set(['pLP','aLP','plLP','alLP','pSP','aSP','nsoLP','regLP','wgV','win','hme','kio','winL','winD','winB','kioL','kioD','kioB']);
+const RATE_MK=new Set(['pLP','aLP','plLP','alLP','pSP','aSP','nsoLP','regLP','wgV','win','hme','kio','winL','winD','winB','kioL','kioD','kioB','menu','menuL','menuD','menuB']);
 
 // For labor PLANNING: use aggStores across all individual stores for AllStores view.
 // This correctly SUMS count metrics (scH, acH, idH, needH, nsoH, regH…) and
@@ -3064,7 +3085,7 @@ function _cmpColValue(col,mk){
 }
 
 // Metrics where lower values are "better" (less labor %, faster SOS, fewer complaints)
-const _CMP_LOWER_BETTER=new Set(['aLP','pLP','alLP','plLP','_acc','win','winL','winD','winB','hme','kio','kioL','kioD','kioB','comp','wgV']);
+const _CMP_LOWER_BETTER=new Set(['aLP','pLP','alLP','plLP','_acc','win','winL','winD','winB','hme','kio','kioL','kioD','kioB','menu','menuL','menuD','menuB','comp','wgV']);
 
 // Render the comparison table — N columns + (Δ when 2 cols) or color-coded cells (when 3+ cols)
 function updCompare(){
@@ -3520,16 +3541,19 @@ function renderLaborTab(d,wk,dy){
 
 // SPEED OF SERVICE
 function updSOS(d,wk,dy){
-  const win=gda(d,wk,'win'),kio=gda(d,wk,'kio'),hme=gda(d,wk,'hme'),cars=gda(d,wk,'cars');
+  const win=gda(d,wk,'win'),kio=gda(d,wk,'kio'),hme=gda(d,wk,'hme'),cars=gda(d,wk,'cars'),menu=gda(d,wk,'menu');
   const winL=gda(d,wk,'winL'),winD=gda(d,wk,'winD'),winB=gda(d,wk,'winB'),kioL=gda(d,wk,'kioL'),kioD=gda(d,wk,'kioD'),kioB=gda(d,wk,'kioB');
-  const hasW=win.some(v=>v>0),hasK=kio.some(v=>v>0),hasH=hme.some(v=>v>0);
+  const menuL=gda(d,wk,'menuL'),menuD=gda(d,wk,'menuD'),menuB=gda(d,wk,'menuB');
+  const hasW=win.some(v=>v>0),hasK=kio.some(v=>v>0),hasH=hme.some(v=>v>0),hasM=menu.some(v=>v>0)||menuL.some(v=>v>0)||menuD.some(v=>v>0)||menuB.some(v=>v>0);
   const hasWL=winL.some(v=>v>0),hasWD=winD.some(v=>v>0),hasWB=winB.some(v=>v>0);
   const hasKL=kioL.some(v=>v>0),hasKD=kioD.some(v=>v>0),hasKB=kioB.some(v=>v>0);
+  const hasML=menuL.some(v=>v>0),hasMD=menuD.some(v=>v>0),hasMB=menuB.some(v=>v>0);
   // info banner
   let info=[];
   if(hasW||hasH)info.push('Window: drive-through timer data'+(hasH?' (HME)':''));
   if(hasK)info.push('Kiosk: fulfillment time data');
-  const _noSOS=!hasW&&!hasK&&!hasH;
+  if(hasM)info.push('Menu: menuboard timer data');
+  const _noSOS=!hasW&&!hasK&&!hasH&&!hasM;
   if(_noSOS)info.push('No Speed of Service data found in this report — ensure the Window and/or Kiosk sheet tabs are present in the uploaded Excel file.');
   document.getElementById('sosIT').textContent=info.join(' · ');
   // Show/hide prominent no-data banner
@@ -3541,7 +3565,8 @@ function updSOS(d,wk,dy){
   const winV=gv(d,wk,'win',dy)||gv(d,wk,'hme',dy),kioV=gv(d,wk,'kio',dy),carV=gv(d,wk,'cars',dy);
   const winLV=gv(d,wk,'winL',dy),winDV=gv(d,wk,'winD',dy);
   const kioLV=gv(d,wk,'kioL',dy),kioDV=gv(d,wk,'kioD',dy);
-  const hasLDWin=winLV>0||winDV>0,hasLDKio=kioLV>0||kioDV>0;
+  const menuV=gv(d,wk,'menu',dy),menuLV=gv(d,wk,'menuL',dy),menuDV=gv(d,wk,'menuD',dy);
+  const hasLDWin=winLV>0||winDV>0,hasLDKio=kioLV>0||kioDV>0,hasLDMenu=menuLV>0||menuDV>0;
   const dyLblSOS=wk==='_period'?'Period avg':Array.isArray(dy)?DAYS.filter((_,i)=>dy.includes(i)).join('+'): dy==='all'?'Week avg':'WTD avg';
   function _sosCls(val,goal){return val>0?(val<=goal?'pos':'neg'):'';}
   function _sosCard(label,val,goal,goalLbl,show){
@@ -3573,6 +3598,14 @@ function updSOS(d,wk,dy){
       sosMGhtml+=`<div class="mc"><div class="ml">Kiosk Time</div><div class="mv">${tF(kioV)}</div><div class="ms">${dyLblSOS}</div></div>`;
     }
   }
+  if(hasM){
+    if(hasLDMenu){
+      sosMGhtml+=`<div class="mc"><div class="ml">📋 Menu Lunch</div><div class="mv">${menuLV>0?tF(menuLV):'—'}</div><div class="ms">${dyLblSOS}</div></div>`;
+      sosMGhtml+=`<div class="mc"><div class="ml">📋 Menu Dinner</div><div class="mv">${menuDV>0?tF(menuDV):'—'}</div><div class="ms">${dyLblSOS}</div></div>`;
+    } else {
+      sosMGhtml+=`<div class="mc"><div class="ml">📋 Menu Time</div><div class="mv">${menuV>0?tF(menuV):'—'}</div><div class="ms">${dyLblSOS}</div></div>`;
+    }
+  }
   sosMGhtml+=`<div class="mc"><div class="ml">Total Cars</div><div class="mv">${nF(carV)}</div><div class="ms">${dyLblSOS}</div></div>`;
   document.getElementById('sosMG').innerHTML=sosMGhtml;
   // SOS debug panel — show when data is missing or partial
@@ -3582,16 +3615,18 @@ function updSOS(d,wk,dy){
   const showTabs=[];
   if(hasW||hasH)showTabs.push({id:'win',label:'🚗 Window'});
   if(hasK)showTabs.push({id:'kio',label:'📱 Kiosk'});
+  if(hasM)showTabs.push({id:'menu',label:'📋 Menu'});
   if(!showTabs.length)showTabs.push({id:'win',label:'🚗 Window'});
   showTabs.push({id:'goals',label:'🎯 Goal Check'});
+  const _menuBundle={menu,menuL,menuD,menuB,hasM,hasML,hasMD,hasMB};
   showTabs.forEach(t=>{
     const btn=document.createElement('button');btn.className='sos-tab'+(APP.sosSub===t.id?' on':'');
     btn.textContent=t.label;
-    btn.onclick=()=>{APP.sosSub=t.id;renderSOSSub(d,wk,win,kio,winL,winD,winB,kioL,kioD,kioB,hasWL,hasWD,hasWB,hasKL,hasKD,hasKB)};
+    btn.onclick=()=>{APP.sosSub=t.id;renderSOSSub(d,wk,win,kio,winL,winD,winB,kioL,kioD,kioB,hasWL,hasWD,hasWB,hasKL,hasKD,hasKB,_menuBundle)};
     tb.appendChild(btn);
   });
   if(!showTabs.find(t=>t.id===APP.sosSub))APP.sosSub=showTabs[0].id;
-  renderSOSSub(d,wk,win,kio,winL,winD,winB,kioL,kioD,kioB,hasWL,hasWD,hasWB,hasKL,hasKD,hasKB);
+  renderSOSSub(d,wk,win,kio,winL,winD,winB,kioL,kioD,kioB,hasWL,hasWD,hasWB,hasKL,hasKD,hasKB,_menuBundle);
   // Total Cars — line chart with inline value labels (no hover required)
   dstry('cCA');const cCA=document.getElementById('cCA');
   if(cCA){
@@ -3601,13 +3636,18 @@ function updSOS(d,wk,dy){
   }
   bldGoalCheck(wk);
 }
-function renderSOSSub(d,wk,win,kio,winL,winD,winB,kioL,kioD,kioB,hasWL,hasWD,hasWB,hasKL,hasKD,hasKB){
+function renderSOSSub(d,wk,win,kio,winL,winD,winB,kioL,kioD,kioB,hasWL,hasWD,hasWB,hasKL,hasKD,hasKB,menuBundle){
+  const mB=menuBundle||{menu:[],menuL:[],menuD:[],menuB:[],hasM:false,hasML:false,hasMD:false,hasMB:false};
+  const menu=mB.menu,menuL=mB.menuL,menuD=mB.menuD,menuB=mB.menuB;
+  const hasML=mB.hasML,hasMD=mB.hasMD,hasMB=mB.hasMB;
   document.querySelectorAll('#sosTabBar .sos-tab').forEach(b=>b.classList.toggle('on',
     APP.sosSub==='win'?b.textContent.includes('Window'):
     APP.sosSub==='kio'?b.textContent.includes('Kiosk'):
+    APP.sosSub==='menu'?b.textContent.includes('Menu'):
     b.textContent.includes('Goal')));
   document.getElementById('sos-win').classList.toggle('on',APP.sosSub==='win');
   document.getElementById('sos-kio').classList.toggle('on',APP.sosSub==='kio');
+  const menuPanel=document.getElementById('sos-menu');if(menuPanel)menuPanel.classList.toggle('on',APP.sosSub==='menu');
   document.getElementById('sos-goals').classList.toggle('on',APP.sosSub==='goals');
   // show/hide breakfast / lunch / dinner / B+L+D tabs based on data availability
   document.querySelectorAll('#sos-win .ld-tab').forEach(t=>{
@@ -3622,13 +3662,21 @@ function renderSOSSub(d,wk,win,kio,winL,winD,winB,kioL,kioD,kioB,hasWL,hasWD,has
     if(t.dataset.ld==='dinner')t.style.display=hasKD?'':'none';
     if(t.dataset.ld==='dayparts')t.style.display=((hasKB?1:0)+(hasKL?1:0)+(hasKD?1:0))>=2?'':'none';
   });
+  document.querySelectorAll('#sos-menu .ld-tab').forEach(t=>{
+    if(t.dataset.ld==='breakfast')t.style.display=hasMB?'':'none';
+    if(t.dataset.ld==='lunch')t.style.display=hasML?'':'none';
+    if(t.dataset.ld==='dinner')t.style.display=hasMD?'':'none';
+    if(t.dataset.ld==='dayparts')t.style.display=((hasMB?1:0)+(hasML?1:0)+(hasMD?1:0))>=2?'':'none';
+  });
   // If current tab is hidden, fall back to "all"
   const winLd=APP.sosLd.win;
   if((winLd==='breakfast'&&!hasWB)||(winLd==='lunch'&&!hasWL)||(winLd==='dinner'&&!hasWD))APP.sosLd.win='all';
   const kioLd=APP.sosLd.kio;
   if((kioLd==='breakfast'&&!hasKB)||(kioLd==='lunch'&&!hasKL)||(kioLd==='dinner'&&!hasKD))APP.sosLd.kio='all';
+  const menuLd=APP.sosLd.menu;
+  if((menuLd==='breakfast'&&!hasMB)||(menuLd==='lunch'&&!hasML)||(menuLd==='dinner'&&!hasMD))APP.sosLd.menu='all';
   // Sync `on` class with current ld
-  ['win','kio'].forEach(metric=>{
+  ['win','kio','menu'].forEach(metric=>{
     document.querySelectorAll('#sos-'+metric+' .ld-tab').forEach(t=>t.classList.toggle('on',t.dataset.ld===APP.sosLd[metric]));
   });
 
@@ -3640,7 +3688,27 @@ function renderSOSSub(d,wk,win,kio,winL,winD,winB,kioL,kioD,kioB,hasWL,hasWD,has
   }
   function _goalLine(lbl,data,color){return{label:lbl,data,borderColor:color,borderDash:[6,4],borderWidth:2,pointRadius:0,fill:false,order:1};}
 
-  if(APP.sosSub==='win'){
+  if(APP.sosSub==='menu'){
+    const ld=APP.sosLd.menu;
+    const datasets=[];
+    if(ld==='dayparts'){
+      if(hasMB)datasets.push(_line('Breakfast',menuB,COLOR_B,false));
+      if(hasML)datasets.push(_line('Lunch',menuL,COLOR_L,false));
+      if(hasMD)datasets.push(_line('Dinner',menuD,COLOR_D,false));
+    } else {
+      let data=menu,color=COLOR_L;
+      if(ld==='breakfast'&&hasMB){data=menuB;color=COLOR_B;}
+      else if(ld==='lunch'&&hasML){data=menuL;color=COLOR_L;}
+      else if(ld==='dinner'&&hasMD){data=menuD;color=COLOR_D;}
+      datasets.push(_line('Menu Time',data,color,true));
+    }
+    dstry('cMN');const cMN=document.getElementById('cMN');if(cMN){
+      const opts=cOpts('s',true);opts.layout={padding:{top:ld==='dayparts'?40:24}};
+      if(ld==='dayparts'){opts.plugins.legend.position='bottom';}
+      else{opts.plugins.legend.display=false;}
+      CH['cMN']=new Chart(cMN,{type:'line',data:{labels:cLabels(APP.week),datasets},options:opts,plugins:[_valueLabelsPlugin(v=>tF(v))]});
+    }
+  } else if(APP.sosSub==='win'){
     const ld=APP.sosLd.win;
     const datasets=[];
     if(ld==='dayparts'){
@@ -3662,7 +3730,7 @@ function renderSOSSub(d,wk,win,kio,winL,winD,winB,kioL,kioD,kioB,hasWL,hasWD,has
       else{opts.plugins.legend.display=false;}
       CH['cWN']=new Chart(cWN,{type:'line',data:{labels:cLabels(APP.week),datasets},options:opts,plugins:[_valueLabelsPlugin(v=>tF(v))]});
     }
-  } else {
+  } else if(APP.sosSub==='kio'){
     const ld=APP.sosLd.kio;
     const datasets=[];
     if(ld==='dayparts'){
@@ -3674,7 +3742,6 @@ function renderSOSSub(d,wk,win,kio,winL,winD,winB,kioL,kioD,kioB,hasWL,hasWD,has
       if(ld==='breakfast'&&hasKB){data=kioB;goalSec=SOS_GOALS.kioB;goalLbl='Goal (6:00)';color=COLOR_B;}
       else if(ld==='lunch'&&hasKL){data=kioL;goalSec=SOS_GOALS.kioL;goalLbl='Goal (6:00)';color=COLOR_L;}
       else if(ld==='dinner'&&hasKD){data=kioD;goalSec=SOS_GOALS.kioD;goalLbl='Goal (6:00)';color=COLOR_D;}
-// (kiosk labels unchanged — 6:00 for all dayparts)
       datasets.push(_line('Kiosk Time',data,color,true));
       if(goalSec)datasets.push(_goalLine(goalLbl,new Array(data.length).fill(goalSec),'#D4A843'));
     }
@@ -3720,12 +3787,15 @@ function setSosLd(el,metric){
   const parent=el.closest('.ld-sub-tabs');
   parent.querySelectorAll('.ld-tab').forEach(t=>t.classList.toggle('on',t===el));
   const d=getLData(),wk=APP.week,dy=resDy(APP.day);
-  const win=gda(d,wk,'win'),kio=gda(d,wk,'kio');
+  const win=gda(d,wk,'win'),kio=gda(d,wk,'kio'),menu=gda(d,wk,'menu');
   const winL=gda(d,wk,'winL'),winD=gda(d,wk,'winD'),winB=gda(d,wk,'winB');
   const kioL=gda(d,wk,'kioL'),kioD=gda(d,wk,'kioD'),kioB=gda(d,wk,'kioB');
+  const menuL=gda(d,wk,'menuL'),menuD=gda(d,wk,'menuD'),menuB=gda(d,wk,'menuB');
   const hasWL=winL.some(v=>v>0),hasWD=winD.some(v=>v>0),hasWB=winB.some(v=>v>0);
   const hasKL=kioL.some(v=>v>0),hasKD=kioD.some(v=>v>0),hasKB=kioB.some(v=>v>0);
-  renderSOSSub(d,wk,win,kio,winL,winD,winB,kioL,kioD,kioB,hasWL,hasWD,hasWB,hasKL,hasKD,hasKB);
+  const hasML=menuL.some(v=>v>0),hasMD=menuD.some(v=>v>0),hasMB=menuB.some(v=>v>0);
+  const hasM=menu.some(v=>v>0)||hasML||hasMD||hasMB;
+  renderSOSSub(d,wk,win,kio,winL,winD,winB,kioL,kioD,kioB,hasWL,hasWD,hasWB,hasKL,hasKD,hasKB,{menu,menuL,menuD,menuB,hasM,hasML,hasMD,hasMB});
 }
 // SOS GOAL CHECK
 const SOS_GOALS={winB:120,winL:70,winD:85,kioB:360,kioL:360,kioD:360};// HME Window: Breakfast<2:00, Lunch<1:10, Dinner<1:25. Kiosk: all dayparts <6:00.
