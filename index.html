@@ -783,6 +783,7 @@ input[type=file]{display:none}
         <div class="cmp-stores-label">Stores to compare:</div>
         <div id="cmpStoreGroups" style="display:flex;flex-wrap:wrap;gap:8px;flex:1"></div>
         <button class="bp" type="button" onclick="cmpAddStoreGroup()" id="cmpAddGroupBtn" style="background:var(--gold);color:var(--navy);font-weight:700">+ Add group</button>
+        <button class="bp" type="button" onclick="cmpClearAllOverrides()" id="cmpClearOvBtn" style="display:none;background:#fff7e6;color:#996b00;border:1px solid #d4a017" title="Remove every session-only manual value">✎ Clear manual values</button>
         <label class="cmp-row-sep" title="Split each comparison row into a column per store. Only applies when multiple stores or a district is selected.">
           <input type="checkbox" id="cmpGlobalSeparate" onchange="cmpUpdGlobalSeparate(this.checked)">
           Show stores separately
@@ -2533,7 +2534,7 @@ const CMP_DEFAULT=['acS','_sVP','aLP','alLP','aSP','_hV','cars','_acc','cgL','cg
 const CMP_COLORS=['#E8432A','#1B2A4A','#D4A843','#27AE60','#7a3d00','#4a2470','#1a6040','#c04020'];
 // Global: locs and separate apply to ALL selection rows (shared store basis)
 // Per-row: selections only hold period + week
-const CMP={selections:[],metrics:null,locs:['AllStores'],locGroups:[],separate:false,_initialized:false,_uid:0,_chart:null,_lastRows:null};
+const CMP={selections:[],metrics:null,locs:['AllStores'],locGroups:[],separate:false,_initialized:false,_uid:0,_chart:null,_lastRows:null,_manualOverrides:{}};
 // Returns every group of stores currently configured.  Group 0 lives in CMP.locs
 // (existing single-picker behaviour) so saved data stays backward-compatible.
 // Groups 1..N are extra pickers the user added via "+ Add another group".
@@ -3132,11 +3133,41 @@ function _cmpHeaderLabel(sel,locs,idx,showLocs){
   if(showLocs&&locs&&locs.length===1)label+=` · ${_cmpLocLabel(locs[0])}`;
   return label;
 }
+// Stable key for a column — used to look up session-only manual overrides
+function _cmpColKey(col){
+  const locs=(col&&col.locs)?col.locs.slice().sort().join(','):'';
+  return `${col&&col.period||''}|${col&&col.week||''}|${locs}`;
+}
+function _cmpManualKey(col,mk){return _cmpColKey(col)+'::'+mk;}
+// Convert a user-typed string back to the internal value the metric expects.
+// Mirrors _cmpFmt's display assumptions (%, %± stored as 0-1 internally; time in seconds).
+function _cmpParseInput(str,fmt){
+  if(str==null)return null;
+  const s=String(str).trim();
+  if(!s)return null;
+  if(fmt==='time'){return parseTStr(s);}
+  // Strip $ , % and spaces for numeric formats
+  const clean=s.replace(/[$,\s%]/g,'');
+  const n=parseFloat(clean);
+  if(isNaN(n))return null;
+  if(fmt==='%'||fmt==='%±')return n/100;
+  return n;
+}
 function _cmpColValue(col,mk){
+  // Session-only manual override — takes precedence over real data so the chart/
+  // table can include weeks where real data is missing.
+  const ov=CMP._manualOverrides&&CMP._manualOverrides[_cmpManualKey(col,mk)];
+  if(ov!=null&&!isNaN(ov))return ov;
   const d=_cmpAggregateLocs(col.period,col.locs);
   if(!d)return null;
   const v=_cmpCompute(d,col.week,mk);
   return(v==null||isNaN(v))?null:v;
+}
+// Check whether a value at (col, mk) was supplied via manual override
+function _cmpIsOverride(col,mk){
+  if(!CMP._manualOverrides)return false;
+  const ov=CMP._manualOverrides[_cmpManualKey(col,mk)];
+  return ov!=null&&!isNaN(ov);
 }
 
 // Metrics where lower values are "better" (less labor %, faster SOS, fewer complaints)
@@ -3204,7 +3235,18 @@ function updCompare(){
       <td class="cmp-metric-col"><span class="cmp-metric-cat">${m.cat}</span><span class="cmp-metric-label">${m.label}</span></td>`;
     vals.forEach((v,i)=>{
       const groupEdge=separateMode&&i>0&&cols[i-1].storeKey!==cols[i].storeKey;
-      row+=`<td class="cmp-num${groupEdge?' cmp-group-edge':''}">${v==null?'-':_cmpFmt(v,m.fmt)}</td>`;
+      const colKey=_cmpColKey(cols[i]);
+      const isOverride=_cmpIsOverride(cols[i],m.k);
+      // Allow inline manual entry when the cell is blank (null) or zero — session only.
+      // event.stopPropagation prevents the row-level chart click from firing.
+      const allowEdit=(v==null||v===0);
+      if(allowEdit&&!isOverride){
+        row+=`<td class="cmp-num${groupEdge?' cmp-group-edge':''}" data-ck="${colKey}" data-mk="${m.k}" data-fmt="${m.fmt}" onclick="event.stopPropagation();cmpEditCell(this)" title="Click to enter a value (session only)" style="cursor:cell">${v==null?'<span style=\"color:#94a3b8;font-size:11px\">+ add</span>':_cmpFmt(v,m.fmt)}</td>`;
+      } else if(isOverride){
+        row+=`<td class="cmp-num cmp-cell-override${groupEdge?' cmp-group-edge':''}" data-ck="${colKey}" data-mk="${m.k}" data-fmt="${m.fmt}" onclick="event.stopPropagation();cmpEditCell(this)" title="Manual value — click to edit, double-click to clear" ondblclick="event.stopPropagation();cmpClearOverride(this)" style="font-style:italic;background:#fff7e6;cursor:cell">${_cmpFmt(v,m.fmt)}<span style="margin-left:4px;color:#d4a017;font-size:10px">✎</span></td>`;
+      } else {
+        row+=`<td class="cmp-num${groupEdge?' cmp-group-edge':''}">${_cmpFmt(v,m.fmt)}</td>`;
+      }
     });
     if(showDelta)row+=`<td class="cmp-num ${dCls}">${dStr}</td><td class="cmp-num ${dCls}">${pctStr}</td>`;
     row+='</tr>';
@@ -3215,6 +3257,7 @@ function updCompare(){
   html+='</tbody>';
   tbl.innerHTML=html;
   CMP._lastRows={cols,rows:_rowsForExport};
+  if(typeof _cmpRefreshClearBtn==='function')_cmpRefreshClearBtn();
 }
 
 // ── Chart modal ──
@@ -3261,11 +3304,10 @@ function _cmpRenderChart(){
     const labels=CMP.selections.map((s,i)=>_cmpSelOnlyHeader(s,i));
     const datasets=allGroups.map((grp,gIdx)=>{
       const color=CMP_COLORS[gIdx%CMP_COLORS.length];
+      // Route through _cmpColValue so session manual overrides apply here too
       const data=CMP.selections.map(s=>{
-        const d=_cmpAggregateLocs(s.period,grp);
-        if(!d)return null;
-        const v=_cmpCompute(d,s.week,mk);
-        return(v==null||isNaN(v))?null:v*scale;
+        const v=_cmpColValue({period:s.period,week:s.week,locs:grp.slice()},mk);
+        return v==null?null:v*scale;
       });
       return{label:_cmpLocsLabel(grp),data,borderColor:color,backgroundColor:color+'22',pointBackgroundColor:color,pointBorderColor:'#fff',pointBorderWidth:2,pointRadius:6,pointHoverRadius:8,borderWidth:2.5,fill:false,tension:.25,spanGaps:true};
     });
@@ -3289,11 +3331,10 @@ function _cmpRenderChart(){
     const labels=CMP.selections.map((s,i)=>_cmpSelOnlyHeader(s,i));
     const datasets=globalLocs.map((loc,storeIdx)=>{
       const color=CMP_COLORS[storeIdx%CMP_COLORS.length];
+      // Route through _cmpColValue so session manual overrides apply here too
       const data=CMP.selections.map(s=>{
-        const d=_cmpAggregateLocs(s.period,[loc]);
-        if(!d)return null;
-        const v=_cmpCompute(d,s.week,mk);
-        return(v==null||isNaN(v))?null:v*scale;
+        const v=_cmpColValue({period:s.period,week:s.week,locs:[loc]},mk);
+        return v==null?null:v*scale;
       });
       return{
         label:_cmpLocLabel(loc),
@@ -3369,6 +3410,55 @@ function cmpToggleChartValues(checked){
     opts.plugins.valueLabels={enabled:!!checked};
     CMP._chart.update('none');
   }
+}
+// ── Session-only manual overrides for empty/zero cells ──
+function cmpEditCell(td){
+  if(!td||td._editing)return;
+  td._editing=true;
+  const ck=td.dataset.ck,mk=td.dataset.mk,fmt=td.dataset.fmt;
+  // Pre-fill with the current display value (or blank if "+ add")
+  const cur=(td.textContent||'').replace(/[✎+\s]/g,'').replace(/add/i,'').trim();
+  td.innerHTML=`<input type="text" value="${cur.replace(/"/g,'&quot;')}" style="width:90%;font:inherit;text-align:right;border:1px solid var(--red);border-radius:3px;padding:2px 4px;background:#fff" onclick="event.stopPropagation()" onkeydown="cmpHandleCellKey(event,this)" onblur="cmpCommitCell(this)">`;
+  const inp=td.querySelector('input');if(inp){inp.focus();inp.select();}
+}
+function cmpHandleCellKey(ev,inp){
+  if(ev.key==='Enter'){ev.preventDefault();inp.blur();}
+  else if(ev.key==='Escape'){ev.preventDefault();inp.value='';inp.blur();}
+}
+function cmpCommitCell(inp){
+  const td=inp.parentElement;if(!td)return;
+  td._editing=false;
+  const ck=td.dataset.ck,mk=td.dataset.mk,fmt=td.dataset.fmt;
+  const raw=inp.value.trim();
+  const key=ck+'::'+mk;
+  if(!raw){delete CMP._manualOverrides[key];}
+  else{
+    const parsed=_cmpParseInput(raw,fmt);
+    if(parsed==null||isNaN(parsed)){delete CMP._manualOverrides[key];}
+    else CMP._manualOverrides[key]=parsed;
+  }
+  _cmpRefreshClearBtn();
+  updCompare();_cmpReRenderChartIfOpen();
+}
+function cmpClearOverride(td){
+  if(!td)return;
+  const key=td.dataset.ck+'::'+td.dataset.mk;
+  delete CMP._manualOverrides[key];
+  _cmpRefreshClearBtn();
+  updCompare();_cmpReRenderChartIfOpen();
+}
+function cmpClearAllOverrides(){
+  if(!Object.keys(CMP._manualOverrides||{}).length)return;
+  if(!confirm('Clear all manual values? This cannot be undone.'))return;
+  CMP._manualOverrides={};
+  _cmpRefreshClearBtn();
+  updCompare();_cmpReRenderChartIfOpen();
+}
+function _cmpRefreshClearBtn(){
+  const btn=document.getElementById('cmpClearOvBtn');if(!btn)return;
+  const n=Object.keys(CMP._manualOverrides||{}).length;
+  btn.style.display=n?'inline-flex':'none';
+  btn.textContent=`✎ Clear ${n} manual value${n===1?'':'s'}`;
 }
 function cmpCloseChart(){
   const mod=document.getElementById('cmpChartModal');if(mod)mod.classList.remove('on');
