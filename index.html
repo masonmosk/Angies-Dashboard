@@ -829,7 +829,7 @@ const SS=['Baseline','Signal','QC','Ray','Pinnacle','Central','LoneCactus','Tbir
 // Maps alternate Excel tab names → SS store keys (when Angie renames a tab in the workbook)
 const SHEET_ALIAS={'Rural':'Ray','Power':'PowerRay'};
 // Bump this whenever parseWB changes structure so old caches are automatically re-parsed
-const PARSE_VER=22;
+const PARSE_VER=23;
 const TBL_DATA={};
 const EXPORT_METRICS=[
   // Metric order mirrors the Excel AllStores sheet so cross-platform reading is fluid.
@@ -1697,6 +1697,7 @@ function parseWB(wb,filenameHint){
     res.month=mn+' '+yr;res.key=mn+' '+yr;
   }
   res.all=parseSheet(wb,'AllStores');
+  res._yr=yr; // stamp fiscal year so cross-period date routing knows what to use
   res.weeks=Object.keys(res.all).sort((a,b)=>+a.split(' ')[1] - +b.split(' ')[1]);
   // Auto-discover any new stores from the Store List sheet (mutates SS/SN/STNUM/SHEET_ALIAS)
   // Must run BEFORE parseStoreList and the SS.forEach iteration so new stores get parsed.
@@ -1716,54 +1717,79 @@ function parseWB(wb,filenameHint){
   console.log('[Parse] Stores parsed:',Object.keys(res.stores).length,'of',SS.length,
     'PowerRay:',res.stores['PowerRay']?Object.keys(res.stores['PowerRay']).length+' weeks':'MISSING');
 
-  // Override SOS metrics from dedicated Window / Kiosk sheet tabs
+  // Override SOS metrics from dedicated Window / Kiosk / Menu sheet tabs.
+  // The sheet may include dates from previously-loaded periods — those rows are
+  // routed back to their owning period in APP.monthly so historical data
+  // appearing in a newer workbook isn't silently dropped.
   function _applySOS(sheetName,metL,metD,metB){
-    const sos=parseSOS_Tab(wb,sheetName,res.all,yr);
+    const sos=parseSOS_Tab(wb,sheetName,res.all,yr,APP.monthly,res.key);
     if(!sos)return;
-    const{hasStores,map}=sos;
+    const{hasStores,map,byPeriod}=sos;
     const mKeys=metB?[metL,metD,metB]:[metL,metD];
-    if(hasStores){
-      // Clear SOS metrics from ALL individual store sheets first — they often contain
-      // company averages, not store-specific data.  The dedicated SOS tab is the source of truth.
-      SS.forEach(s=>{
-        if(!res.stores[s])return;
-        Object.keys(res.stores[s]).forEach(wk=>{
-          if(res.stores[s][wk]&&res.stores[s][wk].m){
-            mKeys.forEach(mk=>{delete res.stores[s][wk].m[mk];});
-          }
-        });
-      });
-      // Now apply per-store data from the dedicated SOS tab
-      Object.entries(map).forEach(([store,wkMap])=>{
-        if(!res.stores[store])return;
-        Object.entries(wkMap).forEach(([wk,vals])=>{
-          if(!res.stores[store][wk])res.stores[store][wk]={sd:'',m:{}};
-          if(vals.l>0)res.stores[store][wk].m[metL]={d:vals.dl,w:vals.l};
-          if(vals.d>0)res.stores[store][wk].m[metD]={d:vals.dd,w:vals.d};
-          if(metB&&vals.b>0)res.stores[store][wk].m[metB]={d:vals.db,w:vals.b};
-        });
-      });
-      // Recalculate AllStores SOS from individual store data
-      res.weeks.forEach(wk=>{
-        mKeys.forEach(mk=>{
-          const vals=SS.filter(s=>res.stores[s]&&res.stores[s][wk]&&res.stores[s][wk].m&&res.stores[s][wk].m[mk]).map(s=>res.stores[s][wk].m[mk]);
-          if(!vals.length)return;
-          const daily=new Array(7).fill(0);let wSum=0;
-          vals.forEach(v=>{v.d.forEach((dv,i)=>{daily[i]+=dv;});wSum+=v.w||0;});
-          if(!res.all[wk])res.all[wk]={sd:'',m:{}};
-          res.all[wk].m[mk]={d:daily.map(v=>v/vals.length),w:wSum/vals.length};
-        });
-      });
-    } else {
-      // Aggregate-only sheet: merge directly into res.all
-      const allMap=map['AllStores']||{};
+    if(!hasStores){
+      // Aggregate-only fallback — keep legacy behaviour for the current period
+      const allMap=(map&&map['AllStores'])||{};
       Object.entries(allMap).forEach(([wk,vals])=>{
         if(!res.all[wk])return;
         if(vals.l>0)res.all[wk].m[metL]={d:vals.dl,w:vals.l};
         if(vals.d>0)res.all[wk].m[metD]={d:vals.dd,w:vals.d};
         if(metB&&vals.b>0)res.all[wk].m[metB]={d:vals.db,w:vals.b};
       });
+      return;
     }
+    // Helper: find the res-like object for a given period key
+    function _resFor(pk){
+      if(pk===res.key)return res;
+      return APP.monthly&&APP.monthly[pk]?APP.monthly[pk]:null;
+    }
+    const _touchedPeriods=new Set();
+    Object.entries(byPeriod||{}).forEach(([periodKey,storeMap])=>{
+      const target=_resFor(periodKey);
+      if(!target||!target.stores)return;
+      _touchedPeriods.add(periodKey);
+      // Clear SOS metrics from every store row in this period first so removed data
+      // doesn't linger from a previous parse.
+      SS.forEach(s=>{
+        if(!target.stores[s])return;
+        Object.keys(target.stores[s]).forEach(wk=>{
+          if(target.stores[s][wk]&&target.stores[s][wk].m){
+            mKeys.forEach(mk=>{delete target.stores[s][wk].m[mk];});
+          }
+        });
+      });
+      // Apply per-store data
+      Object.entries(storeMap).forEach(([store,wkMap])=>{
+        if(!target.stores[store])return;
+        Object.entries(wkMap).forEach(([wk,vals])=>{
+          if(!target.stores[store][wk])target.stores[store][wk]={sd:'',m:{}};
+          if(vals.l>0)target.stores[store][wk].m[metL]={d:vals.dl,w:vals.l};
+          if(vals.d>0)target.stores[store][wk].m[metD]={d:vals.dd,w:vals.d};
+          if(metB&&vals.b>0)target.stores[store][wk].m[metB]={d:vals.db,w:vals.b};
+        });
+      });
+      // Recalculate AllStores SOS for this period's weeks
+      const weeks=Array.isArray(target.weeks)&&target.weeks.length?target.weeks:Object.keys(target.all||{});
+      weeks.forEach(wk=>{
+        mKeys.forEach(mk=>{
+          const vals=SS.filter(s=>target.stores[s]&&target.stores[s][wk]&&target.stores[s][wk].m&&target.stores[s][wk].m[mk]).map(s=>target.stores[s][wk].m[mk]);
+          if(!vals.length)return;
+          const daily=new Array(7).fill(0);let wSum=0;
+          vals.forEach(v=>{v.d.forEach((dv,i)=>{daily[i]+=dv;});wSum+=v.w||0;});
+          if(!target.all[wk])target.all[wk]={sd:'',m:{}};
+          target.all[wk].m[mk]={d:daily.map(v=>v/vals.length),w:wSum/vals.length};
+        });
+      });
+    });
+    // Persist any touched periods OTHER than the current one — the current period
+    // is saved by the upload flow already, but historical periods need a manual
+    // write so the cross-period update survives a refresh.
+    _touchedPeriods.forEach(pk=>{
+      if(pk===res.key)return;
+      const target=APP.monthly[pk];if(!target)return;
+      // dbSave overwrites parsed-only; buffer is preserved because we pass null.
+      // Name is unknown here, so use the period key as a stable fallback.
+      try{dbSave(pk,null,pk+'.xlsx',target).catch(()=>{});}catch(e){}
+    });
   }
   if(wb.SheetNames.includes('Window'))_applySOS('Window','winL','winD','winB');
   if(wb.SheetNames.includes('Kiosk'))_applySOS('Kiosk','kioL','kioD','kioB');
@@ -1895,7 +1921,7 @@ function parseSheet(wb,name){
 // resAll: the parsed AllStores data (for week-start-date → week-name mapping)
 // yr: the fiscal year integer extracted from the workbook
 // Returns: { hasStores: bool, map: { ssKey: { 'Week N': {l,d,dl,dd} } } }
-function parseSOS_Tab(wb, sheetName, resAll, yr){
+function parseSOS_Tab(wb, sheetName, resAll, yr, knownPeriods, currentPeriodKey){
   const ws=wb.Sheets[sheetName];
   // Diagnostics object — stored on APP for the debug panel
   if(!APP._sosDbg)APP._sosDbg={};
@@ -1907,17 +1933,35 @@ function parseSOS_Tab(wb, sheetName, resAll, yr){
   const maxR=Math.min(rng.e.r,599);
   if(!resAll||!yr){dbg.result='FAIL: resAll or yr missing';return null;}
 
-  // Build week-start epoch list from res.all (sd = "MM-DD" format)
+  // Build week-start epoch list across CURRENT period + any previously-loaded periods.
+  // This lets us route historical dates that appear on the new workbook's SOS tab
+  // (e.g. last week of Period 4 showing in a Period 5 sheet) back to the right
+  // period's records instead of dropping them.
   const wkList=[];
-  Object.keys(resAll).forEach(wk=>{
-    const sd=resAll[wk]&&resAll[wk].sd;if(!sd)return;
-    const p=sd.split('-');if(p.length<2)return;
-    const mm=parseInt(p[0]),dd=parseInt(p[1]);
-    const y=mm<=6?yr:yr-1; // fiscal year: Jan-Jun = current yr, Jul-Dec = prior yr
-    wkList.push({wk,epoch:Date.UTC(y,mm-1,dd)});
-  });
+  function _addWeeks(periodKey,allObj,periodYr){
+    Object.keys(allObj||{}).forEach(wk=>{
+      const sd=allObj[wk]&&allObj[wk].sd;if(!sd)return;
+      const p=sd.split('-');if(p.length<2)return;
+      const mm=parseInt(p[0]),dd=parseInt(p[1]);
+      const y=mm<=6?periodYr:periodYr-1;
+      wkList.push({periodKey,wk,epoch:Date.UTC(y,mm-1,dd)});
+    });
+  }
+  // Current period — guaranteed to be available via the resAll arg
+  _addWeeks(currentPeriodKey||'__current',resAll,yr);
+  // Other previously-loaded periods
+  if(knownPeriods&&typeof knownPeriods==='object'){
+    Object.entries(knownPeriods).forEach(([pk,pd])=>{
+      if(pk===currentPeriodKey||!pd||!pd.all)return;
+      const py=pd._yr||yr; // fall back to current yr if not stamped
+      _addWeeks(pk,pd.all,py);
+    });
+  }
+  // De-dup by (periodKey, wk) — keep first
+  const _seen=new Set();
+  for(let i=wkList.length-1;i>=0;i--){const k=wkList[i].periodKey+'|'+wkList[i].wk;if(_seen.has(k))wkList.splice(i,1);else _seen.add(k);}
   wkList.sort((a,b)=>a.epoch-b.epoch);
-  dbg.wkListBuilt=wkList.map(w=>`${w.wk} (epoch ${new Date(w.epoch).toISOString().slice(0,10)})`);
+  dbg.wkListBuilt=wkList.map(w=>`${w.periodKey}::${w.wk} (epoch ${new Date(w.epoch).toISOString().slice(0,10)})`);
 
   // Convert Excel date serial to ms
   function toMs(s){return(s-25569)*86400000;}
@@ -1926,7 +1970,7 @@ function parseSOS_Tab(wb, sheetName, resAll, yr){
   function epochToWk(ms){
     for(let i=wkList.length-1;i>=0;i--){
       const diff=(ms-wkList[i].epoch)/86400000;
-      if(diff>=0&&diff<7)return wkList[i].wk;
+      if(diff>=0&&diff<7)return {periodKey:wkList[i].periodKey,wk:wkList[i].wk};
     }
     return null;
   }
@@ -1987,8 +2031,8 @@ function parseSOS_Tab(wb, sheetName, resAll, yr){
     if(bestCnt>=2)headerRow=best;
   }
 
-  // Build col → {wk, dow} from header row dates
-  const colMap={}; // col index (string) → {wk, dow}
+  // Build col → {periodKey, wk, dow} from header row dates
+  const colMap={};
   dbg.headerRow=headerRow;dbg.layout=_layout;
   if(headerRow>=0){
     for(let c=_cDatesStart;c<=rng.e.c;c++){
@@ -1997,7 +2041,7 @@ function parseSOS_Tab(wb, sheetName, resAll, yr){
       let ms=null,dow=0;
       if(cell.t==='n'&&cell.v>40000&&cell.v<50000){ms=toMs(cell.v);dow=serialDOW(cell.v);}
       else{const pd=parseDateStr(cell.w||cell.v);if(pd){ms=pd.ms;dow=pd.dow;}}
-      if(ms!=null){const wk=epochToWk(ms);if(wk)colMap[String(c)]={wk,dow};}
+      if(ms!=null){const w=epochToWk(ms);if(w)colMap[String(c)]={periodKey:w.periodKey,wk:w.wk,dow};}
     }
   }
   dbg.colMapCount=Object.keys(colMap).length;
@@ -2126,14 +2170,16 @@ function parseSOS_Tab(wb, sheetName, resAll, yr){
     const isD=/\bdinner\b/i.test(lbl);
     if(!isB&&!isL&&!isD)continue;
 
-    // Read each date-mapped column
-    for(const[cStr,{wk,dow}]of Object.entries(colMap)){
+    // Read each date-mapped column — acc is keyed by `${periodKey}|${wk}` so we
+    // accumulate cross-period rows from a single sheet correctly.
+    for(const[cStr,{periodKey,wk,dow}]of Object.entries(colMap)){
       const v=getCV(ws,r,parseInt(cStr),true);
       if(v<=0)continue;
-      if(!acc[cStore][wk])acc[cStore][wk]={lByDow:new Array(7).fill(0),dByDow:new Array(7).fill(0),bByDow:new Array(7).fill(0),lVals:[],dVals:[],bVals:[]};
-      if(isB){acc[cStore][wk].bByDow[dow]=v;acc[cStore][wk].bVals.push(v);dbg.valuesFound++;}
-      if(isL){acc[cStore][wk].lByDow[dow]=v;acc[cStore][wk].lVals.push(v);dbg.valuesFound++;}
-      if(isD){acc[cStore][wk].dByDow[dow]=v;acc[cStore][wk].dVals.push(v);dbg.valuesFound++;}
+      const wkKey=periodKey+'|'+wk;
+      if(!acc[cStore][wkKey])acc[cStore][wkKey]={lByDow:new Array(7).fill(0),dByDow:new Array(7).fill(0),bByDow:new Array(7).fill(0),lVals:[],dVals:[],bVals:[]};
+      if(isB){acc[cStore][wkKey].bByDow[dow]=v;acc[cStore][wkKey].bVals.push(v);dbg.valuesFound++;}
+      if(isL){acc[cStore][wkKey].lByDow[dow]=v;acc[cStore][wkKey].lVals.push(v);dbg.valuesFound++;}
+      if(isD){acc[cStore][wkKey].dByDow[dow]=v;acc[cStore][wkKey].dVals.push(v);dbg.valuesFound++;}
     }
   }
   // Diagnose store matching
@@ -2142,23 +2188,32 @@ function parseSOS_Tab(wb, sheetName, resAll, yr){
   dbg.storeCols=_storeCols;
   dbg.accStores=Object.keys(acc);
 
-  // Convert accumulated day values to weekly averages
-  const map={};
+  // Convert accumulated day values to weekly averages, splitting by period.
+  // Returned shape: { [periodKey]: { [store]: { [wk]: vals } } }
+  const byPeriod={};
   for(const[store,wkData]of Object.entries(acc)){
-    map[store]={};
-    for(const[wk,d]of Object.entries(wkData)){
+    for(const[wkKey,d]of Object.entries(wkData)){
+      const splitIdx=wkKey.indexOf('|');
+      const periodKey=wkKey.slice(0,splitIdx);
+      const wk=wkKey.slice(splitIdx+1);
       const lNZ=d.lVals.filter(v=>v>0),dNZ=d.dVals.filter(v=>v>0),bNZ=(d.bVals||[]).filter(v=>v>0);
       const l=lNZ.length?lNZ.reduce((a,b)=>a+b)/lNZ.length:0;
       const dv=dNZ.length?dNZ.reduce((a,b)=>a+b)/dNZ.length:0;
       const b=bNZ.length?bNZ.reduce((a,b)=>a+b)/bNZ.length:0;
-      if(l>0||dv>0||b>0)map[store][wk]={l,d:dv,b,dl:d.lByDow,dd:d.dByDow,db:d.bByDow||new Array(7).fill(0)};
+      if(l>0||dv>0||b>0){
+        if(!byPeriod[periodKey])byPeriod[periodKey]={};
+        if(!byPeriod[periodKey][store])byPeriod[periodKey][store]={};
+        byPeriod[periodKey][store][wk]={l,d:dv,b,dl:d.lByDow,dd:d.dByDow,db:d.bByDow||new Array(7).fill(0)};
+      }
     }
   }
-
-  const hasStores=Object.keys(map).length>0;
-  dbg.result=hasStores?`OK — ${Object.keys(map).length} stores, ${dbg.valuesFound} values`:`EMPTY — ${dbg.valuesFound} values, wkList=${dbg.wkListBuilt.length}, colMap=${dbg.colMapCount}, headerRow=${dbg.headerRow}, storeMatches=${dbg.storesMatched.length}/${dbg.storesFound.length}`;
+  // Backward-compat: the current period's map is still surfaced as `map` for callers
+  // that haven't been updated to handle the multi-period shape.
+  const map=byPeriod[currentPeriodKey||'__current']||{};
+  const hasStores=Object.keys(byPeriod).some(pk=>Object.keys(byPeriod[pk]||{}).length>0);
+  dbg.result=hasStores?`OK — ${Object.keys(map).length} stores in current period (${Object.keys(byPeriod).length} periods touched), ${dbg.valuesFound} values`:`EMPTY — ${dbg.valuesFound} values, wkList=${dbg.wkListBuilt.length}, colMap=${dbg.colMapCount}, headerRow=${dbg.headerRow}, storeMatches=${dbg.storesMatched.length}/${dbg.storesFound.length}`;
   console.log(`[SOS parseSOS_Tab] ${sheetName}:`,dbg);
-  return{hasStores,map};
+  return{hasStores,map,byPeriod};
 }
 
 function getCV(ws,r,c,isTime){
