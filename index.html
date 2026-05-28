@@ -4471,7 +4471,8 @@ function updOpsHub(wk,dy){
   function cKL(v){return _sosTier(v,SOS_GOALS.kioL,SOS_CRIT.kioL);}
   function cKD(v){return _sosTier(v,SOS_GOALS.kioD,SOS_CRIT.kioD);}
   function cAcc(v){return v>=0?(v<=APP.goals.acc?'oh-g':'oh-r'):'';}     // accuracy: <1.0=green
-  function cCG(v){return!v?'':v>0?'oh-r':'oh-a';}                         // cogs: missing=red, overage=amber
+  // COGS variance: only flag in red when absolute variance exceeds $75; otherwise no color.
+  function cCG(v){if(v==null||v===0||isNaN(v))return '';return Math.abs(v)>75?'oh-r':'';}
 
   // formatters
   function fS(v){return v?'$'+Math.round(v).toLocaleString():'-';}
