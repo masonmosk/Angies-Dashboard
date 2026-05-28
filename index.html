@@ -148,7 +148,8 @@ input[type=file]{display:none}
 .oh-g{background:rgba(39,174,96,.18)!important;color:#1a6a35!important;font-weight:600}
 .oh-r{background:rgba(232,67,42,.18)!important;color:#b81e08!important;font-weight:600}
 .oh-a{background:rgba(212,168,67,.25)!important;color:#8a5e00!important;font-weight:600}
-.oh-tbl .oh-total .oh-g,.oh-tbl .oh-total .oh-r,.oh-tbl .oh-total .oh-a{color:#fff!important;background:#1B2A4A!important}
+.oh-y{background:rgba(255,193,7,.28)!important;color:#7a5a00!important;font-weight:600}
+.oh-tbl .oh-total .oh-g,.oh-tbl .oh-total .oh-r,.oh-tbl .oh-total .oh-a,.oh-tbl .oh-total .oh-y{color:#fff!important;background:#1B2A4A!important}
 .oh-print-btn{float:right;margin-bottom:8px;padding:6px 14px;background:var(--navy);color:#fff;border:none;border-radius:6px;font-size:12px;cursor:pointer}
 .oh-print-btn:hover{background:var(--navy-l)}
 .oh-tbl td.oh-click{cursor:pointer}.oh-tbl td.oh-click:hover{filter:brightness(.88);outline:1px solid rgba(0,0,0,.15)}
@@ -4456,12 +4457,19 @@ function updOpsHub(wk,dy){
   function cH(v){return(v||v===0)&&v!==0?(v<0?'oh-g':'oh-r'):'';}        // hrs var: under=green, over=red
   function cL(v){return v>0?(v*100<=APP.goals.labor?'oh-g':'oh-r'):'';}  // labor %: ≤24%=green
   function cLV(v){return v!==null&&v!==undefined&&v!==0?(v<0?'oh-g':'oh-r'):'';} // labor var: <0=green, >0=red, =0 neutral
-  function cDTB(v){return v>0?(v<=SOS_GOALS.winB?'oh-g':'oh-r'):'';}     // DT Breakfast: <2:00=green
-  function cDTL(v){return v>0?(v<=SOS_GOALS.winL?'oh-g':'oh-r'):'';}     // DT Lunch: <1:10=green
-  function cDTD(v){return v>0?(v<=SOS_GOALS.winD?'oh-g':'oh-r'):'';}     // DT Dinner: <1:25=green
-  function cKB(v){return v>0?(v<=SOS_GOALS.kioB?'oh-g':'oh-r'):'';}      // Kiosk Breakfast: <6:00=green
-  function cKL(v){return v>0?(v<=SOS_GOALS.kioL?'oh-g':'oh-r'):'';}      // Kiosk Lunch: <6:00=green
-  function cKD(v){return v>0?(v<=SOS_GOALS.kioD?'oh-g':'oh-r'):'';}      // Kiosk CT/DC: <6:00=green
+  // 3-tier SOS coloring:
+  //   ≤ goal  → green (oh-g)
+  //   ≤ crit  → yellow / warning (oh-y)
+  //   >  crit → red / critical (oh-r)
+  // Critical thresholds: DT Breakfast 3:00, DT Lunch/Dinner 2:00, Kiosk B/L/D 8:00.
+  const SOS_CRIT={winB:180,winL:120,winD:120,kioB:480,kioL:480,kioD:480};
+  function _sosTier(v,goal,crit){if(v<=0)return '';if(v<=goal)return 'oh-g';if(v<=crit)return 'oh-y';return 'oh-r';}
+  function cDTB(v){return _sosTier(v,SOS_GOALS.winB,SOS_CRIT.winB);}
+  function cDTL(v){return _sosTier(v,SOS_GOALS.winL,SOS_CRIT.winL);}
+  function cDTD(v){return _sosTier(v,SOS_GOALS.winD,SOS_CRIT.winD);}
+  function cKB(v){return _sosTier(v,SOS_GOALS.kioB,SOS_CRIT.kioB);}
+  function cKL(v){return _sosTier(v,SOS_GOALS.kioL,SOS_CRIT.kioL);}
+  function cKD(v){return _sosTier(v,SOS_GOALS.kioD,SOS_CRIT.kioD);}
   function cAcc(v){return v>=0?(v<=APP.goals.acc?'oh-g':'oh-r'):'';}     // accuracy: <1.0=green
   function cCG(v){return!v?'':v>0?'oh-r':'oh-a';}                         // cogs: missing=red, overage=amber
 
