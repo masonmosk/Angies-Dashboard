@@ -1970,11 +1970,20 @@ function parseSOS_Tab(wb, sheetName, resAll, yr, knownPeriods, currentPeriodKey)
 
   // Determine which week a given epoch belongs to (within 0–6 days of that week's Monday)
   function epochToWk(ms){
+    // Collect every week whose 7-day window contains this date.  Period boundaries
+    // can overlap (e.g. an old Period 5 workbook stamped 5 weeks ending 6/7, and a
+    // new Period 6 workbook starts 6/1) so a single date can match multiple weeks.
+    // We always prefer the period being uploaded — that's authoritative for its own
+    // date range — and fall back to the most recent other period otherwise.
+    let curMatch=null,otherMatch=null;
     for(let i=wkList.length-1;i>=0;i--){
       const diff=(ms-wkList[i].epoch)/86400000;
-      if(diff>=0&&diff<7)return {periodKey:wkList[i].periodKey,wk:wkList[i].wk};
+      if(diff<0||diff>=7)continue;
+      if(wkList[i].periodKey===currentPeriodKey){curMatch=wkList[i];break;}
+      if(!otherMatch)otherMatch=wkList[i];
     }
-    return null;
+    const m=curMatch||otherMatch;
+    return m?{periodKey:m.periodKey,wk:m.wk}:null;
   }
 
   // Day-of-week index (0=Mon…6=Sun) from Excel serial
