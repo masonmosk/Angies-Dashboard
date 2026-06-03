@@ -831,7 +831,7 @@ const SS=['Baseline','Signal','QC','Ray','Pinnacle','Central','LoneCactus','Tbir
 // Maps alternate Excel tab names → SS store keys (when Angie renames a tab in the workbook)
 const SHEET_ALIAS={'Rural':'Ray','Power':'PowerRay'};
 // Bump this whenever parseWB changes structure so old caches are automatically re-parsed
-const PARSE_VER=23;
+const PARSE_VER=24;
 const TBL_DATA={};
 const EXPORT_METRICS=[
   // Metric order mirrors the Excel AllStores sheet so cross-platform reading is fluid.
@@ -1749,11 +1749,18 @@ function parseWB(wb,filenameHint){
       const target=_resFor(periodKey);
       if(!target||!target.stores)return;
       _touchedPeriods.add(periodKey);
-      // Clear SOS metrics from every store row in this period first so removed data
-      // doesn't linger from a previous parse.
+      const isCurrent=(periodKey===res.key);
+      // Build the set of weeks that have incoming data so we only clear those.
+      // For the CURRENT period we still clear everything (the workbook is the
+      // authoritative source for its own period). For OTHER periods only the
+      // weeks that overlap with this new workbook get refreshed — historical
+      // weeks not represented here keep their existing data.
+      const incomingWeeks=new Set();
+      Object.values(storeMap).forEach(wkMap=>{Object.keys(wkMap).forEach(wk=>incomingWeeks.add(wk));});
       SS.forEach(s=>{
         if(!target.stores[s])return;
         Object.keys(target.stores[s]).forEach(wk=>{
+          if(!isCurrent&&!incomingWeeks.has(wk))return; // preserve historical weeks not in this upload
           if(target.stores[s][wk]&&target.stores[s][wk].m){
             mKeys.forEach(mk=>{delete target.stores[s][wk].m[mk];});
           }
@@ -1769,12 +1776,17 @@ function parseWB(wb,filenameHint){
           if(metB&&vals.b>0)target.stores[store][wk].m[metB]={d:vals.db,w:vals.b};
         });
       });
-      // Recalculate AllStores SOS for this period's weeks
-      const weeks=Array.isArray(target.weeks)&&target.weeks.length?target.weeks:Object.keys(target.all||{});
-      weeks.forEach(wk=>{
+      // Recalculate AllStores SOS — for current period do every week; for
+      // historical periods only recalc the weeks we actually touched.
+      const weeksToRecalc=isCurrent?(Array.isArray(target.weeks)&&target.weeks.length?target.weeks:Object.keys(target.all||{})):[...incomingWeeks];
+      weeksToRecalc.forEach(wk=>{
         mKeys.forEach(mk=>{
           const vals=SS.filter(s=>target.stores[s]&&target.stores[s][wk]&&target.stores[s][wk].m&&target.stores[s][wk].m[mk]).map(s=>target.stores[s][wk].m[mk]);
-          if(!vals.length)return;
+          if(!vals.length){
+            // No store has data for this metric/week — drop any stale AllStores aggregate
+            if(target.all[wk]&&target.all[wk].m)delete target.all[wk].m[mk];
+            return;
+          }
           const daily=new Array(7).fill(0);let wSum=0;
           vals.forEach(v=>{v.d.forEach((dv,i)=>{daily[i]+=dv;});wSum+=v.w||0;});
           if(!target.all[wk])target.all[wk]={sd:'',m:{}};
