@@ -4452,7 +4452,22 @@ function updOpsHub(wk,dy){
     const sales=gv(d,wk,'acS',dy);
     const pjS=gv(d,wk,'pjS',dy);
     const salesVar=pjS>0?sales-pjS:null;
-    const hrsV=gv(d,wk,'acH',dy)-gv(d,wk,'scH',dy);
+    // Hours variance: when specific days are selected (or WTD expands to a day
+    // range), only include days where actuals were reported so unworked future
+    // days don't get counted as a giant negative variance.
+    let hrsV;
+    if(Array.isArray(dy)){
+      const acD=(d[wk]&&d[wk].m&&d[wk].m.acH&&d[wk].m.acH.d)||[];
+      const scD=(d[wk]&&d[wk].m&&d[wk].m.scH&&d[wk].m.scH.d)||[];
+      let aT=0,sT=0;
+      dy.forEach(i=>{
+        const av=acD[+i]||0;
+        if(av>0){aT+=av;sT+=scD[+i]||0;}
+      });
+      hrsV=aT-sT;
+    } else {
+      hrsV=gv(d,wk,'acH',dy)-gv(d,wk,'scH',dy);
+    }
     const labA=gv(d,wk,'aLP',dy);
     const labP=gv(d,wk,'pLP',dy);
     const splh=gv(d,wk,'aSP',dy);
