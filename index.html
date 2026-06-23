@@ -1188,7 +1188,8 @@ function _findMatchingPeriodKey(fp,excludeKey){
   }
   return null;
 }
-// Detector: scan saved periods for date-range duplicates and offer to merge.
+// Detector: scan saved periods for date-range duplicates and silently consolidate
+// into the canonical key.  Prefers "Period N FYNN" over "Mon Year" fallbacks.
 // Returns the number of duplicate pairs resolved this run.
 function _resolveDuplicatePeriods(){
   const fps={};
@@ -1201,20 +1202,23 @@ function _resolveDuplicatePeriods(){
   });
   if(!dupes.length)return 0;
   let resolved=0;
+  const dropped=[];
   for(const[a,b]of dupes){
     if(!APP.monthly[a]||!APP.monthly[b])continue; // already removed
+    // Canonical winner: prefer "Period N FYNN" form; if both or neither, keep `a`.
     const keep=_isPeriodKey(a)?a:(_isPeriodKey(b)?b:a);
     const drop=keep===a?b:a;
-    if(!confirm(`Two saved uploads cover the same week range:\n\n  • ${APP.labels[a]||a}\n  • ${APP.labels[b]||b}\n\nKeep "${APP.labels[keep]||keep}" and remove "${APP.labels[drop]||drop}"?`))continue;
     delete APP.monthly[drop];
     delete APP.labels[drop];
     if(APP.period===drop)APP.period=keep;
     dbDelete(drop).catch(()=>{});
+    dropped.push(drop);
     resolved++;
   }
   if(resolved){
     autoSaveConfig();
     showDash();
+    showToast(`🧹 Merged ${resolved} duplicate ${resolved===1?'period':'periods'} (${dropped.join(', ')}).`,4500);
   }
   return resolved;
 }
@@ -1315,23 +1319,36 @@ async function _ghRead(path){
 async function _ghWrite(path,data,msg){
   const token=_ghToken();if(!token)throw new Error('No GitHub token configured — add it in Settings.');
   await _ghEnsureBranch();
-  // Get current file SHA (needed for updates)
-  let sha=null;
-  try{
-    const ex=await fetch(`https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${path}?ref=${GH_BRANCH}`,{headers:{'Authorization':'token '+token}});
-    if(ex.ok){const d=await ex.json();sha=d.sha;}
-  }catch(e){}
+  async function _fetchSha(){
+    try{
+      const ex=await fetch(`https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${path}?ref=${GH_BRANCH}&t=${Date.now()}`,{headers:{'Authorization':'token '+token,'Cache-Control':'no-cache'}});
+      if(ex.ok){const d=await ex.json();return d.sha||null;}
+    }catch(e){}
+    return null;
+  }
   const jsonStr=JSON.stringify(data);
-  // Base64 encode (handle unicode)
   const bytes=new TextEncoder().encode(jsonStr);
   let binary='';for(let i=0;i<bytes.length;i++)binary+=String.fromCharCode(bytes[i]);
   const content=btoa(binary);
-  const body={message:msg||'Update '+path,content,branch:GH_BRANCH};
-  if(sha)body.sha=sha;
-  const res=await fetch(`https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${path}`,{
-    method:'PUT',headers:{'Authorization':'token '+token,'Content-Type':'application/json'},
-    body:JSON.stringify(body)
-  });
+  // Try with the current SHA; on a 409 (someone else updated between our read and write)
+  // refetch the SHA once and retry.  Avoids spurious "sync failed" errors when two
+  // tabs/teammates push within a second of each other.
+  async function _attempt(sha){
+    const body={message:msg||'Update '+path,content,branch:GH_BRANCH};
+    if(sha)body.sha=sha;
+    const res=await fetch(`https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${path}`,{
+      method:'PUT',headers:{'Authorization':'token '+token,'Content-Type':'application/json'},
+      body:JSON.stringify(body)
+    });
+    return res;
+  }
+  let sha=await _fetchSha();
+  let res=await _attempt(sha);
+  if(res.status===409){
+    // SHA went stale — refetch and try again
+    sha=await _fetchSha();
+    res=await _attempt(sha);
+  }
   if(!res.ok){const txt=await res.text();throw new Error('GitHub API '+res.status+': '+txt);}
   return res.json();
 }
