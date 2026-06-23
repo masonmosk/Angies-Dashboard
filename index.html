@@ -1169,6 +1169,55 @@ function showToast(msg,dur=5000){
   clearTimeout(_toastTimer);
   _toastTimer=setTimeout(()=>{el.style.opacity='0';setTimeout(()=>{el.style.display='none'},400);},dur);
 }
+// ── Duplicate-period helpers ──
+// Two uploads can land on different keys ("June 2026" vs "Period 6 FY26") when
+// the parser couldn't infer the fiscal-period number on the earlier run.
+// These helpers fingerprint a period by its week-start dates so we can detect
+// collisions and consolidate them.
+function _periodFingerprint(pd){
+  if(!pd||!pd.all)return null;
+  const sds=Object.values(pd.all).map(w=>w&&w.sd).filter(Boolean).sort();
+  return sds.length?sds.join('|'):null;
+}
+function _isPeriodKey(k){return /^Period\s+\d+\s+FY\d+/i.test(k);}
+function _findMatchingPeriodKey(fp,excludeKey){
+  if(!fp)return null;
+  for(const k of Object.keys(APP.monthly)){
+    if(k===excludeKey)continue;
+    if(_periodFingerprint(APP.monthly[k])===fp)return k;
+  }
+  return null;
+}
+// Detector: scan saved periods for date-range duplicates and offer to merge.
+// Returns the number of duplicate pairs resolved this run.
+function _resolveDuplicatePeriods(){
+  const fps={};
+  const dupes=[];
+  Object.keys(APP.monthly).forEach(k=>{
+    const fp=_periodFingerprint(APP.monthly[k]);
+    if(!fp)return;
+    if(fps[fp])dupes.push([fps[fp],k]);
+    else fps[fp]=k;
+  });
+  if(!dupes.length)return 0;
+  let resolved=0;
+  for(const[a,b]of dupes){
+    if(!APP.monthly[a]||!APP.monthly[b])continue; // already removed
+    const keep=_isPeriodKey(a)?a:(_isPeriodKey(b)?b:a);
+    const drop=keep===a?b:a;
+    if(!confirm(`Two saved uploads cover the same week range:\n\n  • ${APP.labels[a]||a}\n  • ${APP.labels[b]||b}\n\nKeep "${APP.labels[keep]||keep}" and remove "${APP.labels[drop]||drop}"?`))continue;
+    delete APP.monthly[drop];
+    delete APP.labels[drop];
+    if(APP.period===drop)APP.period=keep;
+    dbDelete(drop).catch(()=>{});
+    resolved++;
+  }
+  if(resolved){
+    autoSaveConfig();
+    showDash();
+  }
+  return resolved;
+}
 function removePeriod(key){
   const lbl=APP.labels[key]||key;
   if(!confirm(`Remove "${lbl}" from the dashboard?\n\nIt will also be deleted from your saved browser data.`))return;
@@ -1513,6 +1562,9 @@ async function initDB(){
     }
     if(Object.keys(APP.monthly).length){showDash();updDBBadge(lastSaved);}
     setLD(0);
+    // Run the duplicate-period detector after the initial render so any pre-existing
+    // overlap (e.g. "June 2026" + "Period 6 FY26" from earlier uploads) prompts to merge.
+    if(typeof _resolveDuplicatePeriods==='function')setTimeout(_resolveDuplicatePeriods,500);
   }catch(err){console.warn('IndexedDB unavailable:',err);setLD(0);}
 }
 // ──────────────────────────────────────────────────────────────────────────
@@ -1526,6 +1578,26 @@ function doFile(f,extra){
       const wb=XLSX.read(new Uint8Array(buf),{type:'array',cellDates:false,cellNF:true,cellStyles:false});
       const d=parseWB(wb,f.name); // pass filename so period number can be detected
       d._v=PARSE_VER; // stamp version for cache validation
+      // ── Preventor: avoid creating a duplicate period under a different key.
+      // If an existing period covers the same week-start dates, prefer the
+      // "Period N FYNN" naming over the calendar "Mon Year" fallback.
+      const _fp=_periodFingerprint(d);
+      const _dupKey=_findMatchingPeriodKey(_fp,d.key);
+      if(_dupKey){
+        const newIsP=_isPeriodKey(d.key),dupIsP=_isPeriodKey(_dupKey);
+        if(newIsP&&!dupIsP){
+          // New "Period N" upload wins — drop the old "Mon Year" duplicate
+          delete APP.monthly[_dupKey];
+          delete APP.labels[_dupKey];
+          if(APP.period===_dupKey)APP.period=d.key;
+          dbDelete(_dupKey).catch(()=>{});
+        } else if(!newIsP&&dupIsP){
+          // Existing "Period N" key is canonical — rewrite this upload's key to it
+          d.key=_dupKey;
+          d.month=APP.monthly[_dupKey]&&APP.monthly[_dupKey].month||d.month;
+        }
+        // else both are the same naming scheme — fall through, last write wins
+      }
       const isNew=!APP.monthly[d.key]; // brand-new month being added?
       const prevMonths=Object.keys(APP.monthly).filter(k=>k!==d.key);
       APP.monthly[d.key]=d;
