@@ -831,7 +831,7 @@ const SS=['Baseline','Signal','QC','Ray','Pinnacle','Central','LoneCactus','Tbir
 // Maps alternate Excel tab names → SS store keys (when Angie renames a tab in the workbook)
 const SHEET_ALIAS={'Rural':'Ray','Power':'PowerRay'};
 // Bump this whenever parseWB changes structure so old caches are automatically re-parsed
-const PARSE_VER=24;
+const PARSE_VER=25;
 const TBL_DATA={};
 const EXPORT_METRICS=[
   // Metric order mirrors the Excel AllStores sheet so cross-platform reading is fluid.
@@ -1789,6 +1789,31 @@ function parseWB(wb,filenameHint){
   }
   res.all=parseSheet(wb,'AllStores');
   res._yr=yr; // stamp fiscal year so cross-period date routing knows what to use
+  // ── Benefits Assumption ──
+  // Each workbook's Instructions sheet defines what fraction of payroll is
+  // burdened with benefits (typically ~0.134 = 13.4%).  We stamp this on the
+  // period so Ops Hub / Labor / Compare can display labor % with benefits.
+  (function _parseBenefitsFactor(){
+    const wsI=wb.Sheets['Instructions'];
+    if(!wsI||!wsI['!ref']){res.benefitsFactor=0.134;return;}
+    const rngI=XLSX.utils.decode_range(wsI['!ref']);
+    for(let r=0;r<=Math.min(40,rngI.e.r);r++){
+      for(let c=0;c<=3;c++){
+        const lc=wsI[XLSX.utils.encode_cell({r,c})];
+        if(!lc||lc.v==null)continue;
+        if(!/benefit/i.test(String(lc.v)))continue;
+        // Found the label — scan adjacent cells for a numeric assumption (0..1 or 0..100)
+        for(let cc=c+1;cc<=Math.min(c+4,rngI.e.c);cc++){
+          const vc=wsI[XLSX.utils.encode_cell({r,c:cc})];
+          if(vc&&typeof vc.v==='number'){
+            res.benefitsFactor=vc.v>1?vc.v/100:vc.v; // accept 13.4 or 0.134
+            return;
+          }
+        }
+      }
+    }
+    res.benefitsFactor=0.134; // sensible default if not found
+  })();
   res.weeks=Object.keys(res.all).sort((a,b)=>+a.split(' ')[1] - +b.split(' ')[1]);
   // Auto-discover any new stores from the Store List sheet (mutates SS/SN/STNUM/SHEET_ALIAS)
   // Must run BEFORE parseStoreList and the SS.forEach iteration so new stores get parsed.
@@ -1812,11 +1837,12 @@ function parseWB(wb,filenameHint){
   // The sheet may include dates from previously-loaded periods — those rows are
   // routed back to their owning period in APP.monthly so historical data
   // appearing in a newer workbook isn't silently dropped.
-  function _applySOS(sheetName,metL,metD,metB){
+  function _applySOS(sheetName,metL,metD,metB,metAll){
     const sos=parseSOS_Tab(wb,sheetName,res.all,yr,APP.monthly,res.key);
     if(!sos)return;
     const{hasStores,map,byPeriod}=sos;
     const mKeys=metB?[metL,metD,metB]:[metL,metD];
+    if(metAll)mKeys.push(metAll);
     if(!hasStores){
       // Aggregate-only fallback — keep legacy behaviour for the current period
       const allMap=(map&&map['AllStores'])||{};
@@ -1863,6 +1889,8 @@ function parseWB(wb,filenameHint){
           if(vals.l>0)target.stores[store][wk].m[metL]={d:vals.dl,w:vals.l};
           if(vals.d>0)target.stores[store][wk].m[metD]={d:vals.dd,w:vals.d};
           if(metB&&vals.b>0)target.stores[store][wk].m[metB]={d:vals.db,w:vals.b};
+          // "Total" row → all-day metric (win/kio/menu) — car-weighted average from the workbook
+          if(metAll&&vals.t>0)target.stores[store][wk].m[metAll]={d:vals.dt,w:vals.t};
         });
       });
       // Recalculate AllStores SOS — for current period do every week; for
@@ -1894,9 +1922,9 @@ function parseWB(wb,filenameHint){
       try{dbSave(pk,null,pk+'.xlsx',target).catch(()=>{});}catch(e){}
     });
   }
-  if(wb.SheetNames.includes('Window'))_applySOS('Window','winL','winD','winB');
-  if(wb.SheetNames.includes('Kiosk'))_applySOS('Kiosk','kioL','kioD','kioB');
-  if(wb.SheetNames.includes('Menu'))_applySOS('Menu','menuL','menuD','menuB');
+  if(wb.SheetNames.includes('Window'))_applySOS('Window','winL','winD','winB','win');
+  if(wb.SheetNames.includes('Kiosk'))_applySOS('Kiosk','kioL','kioD','kioB','kio');
+  if(wb.SheetNames.includes('Menu'))_applySOS('Menu','menuL','menuD','menuB','menu');
 
   // Attach metadata for confirmation banner
   res.storeCount=Object.keys(res.stores).length;
@@ -2261,6 +2289,7 @@ function parseSOS_Tab(wb, sheetName, resAll, yr, knownPeriods, currentPeriodKey)
     if(isAggRow){cStore=null;continue;}
 
     // Meal label column — check primary label col AND nearby cols for lunch/dinner keywords
+    // OR the "Total" row (the workbook's pre-computed weighted average across dayparts).
     let lbl=null;
     const _labelCols=[_cLabel];
     if(_cLabel!==1)_labelCols.push(1);
@@ -2270,17 +2299,20 @@ function parseSOS_Tab(wb, sheetName, resAll, yr, knownPeriods, currentPeriodKey)
       const lc=ws[XLSX.utils.encode_cell({r,c:lc_col})];
       if(lc&&lc.v!=null){
         const v=String(lc.v).trim();
-        if(/\b(breakfast|lunch|dinner)\b/i.test(v)){lbl=v;break;}
+        if(/\b(breakfast|lunch|dinner)\b/i.test(v)||/^total\s*$/i.test(v)){lbl=v;break;}
       }
     }
     if(!lbl)continue;
     // Skip combined "Total-Lunch/dinner" rows — they match both lunch and dinner regex
     // but are a blended average, not a peak measurement; including them corrupts both metrics
-    if(/total[-\s/]*(lunch|dinner|breakfast)/i.test(lbl))continue;
+    if(/total[-\s/]+(lunch|dinner|breakfast)/i.test(lbl))continue;
     const isB=/\bbreakfast\b/i.test(lbl);
     const isL=/\blunch\b/i.test(lbl);
     const isD=/\bdinner\b/i.test(lbl);
-    if(!isB&&!isL&&!isD)continue;
+    // "Total" row = the workbook's car-weighted average across all dayparts.
+    // Used by the dashboard as the all-day metric (win / kio / menu).
+    const isT=/^total\s*$/i.test(lbl);
+    if(!isB&&!isL&&!isD&&!isT)continue;
 
     // Read each date-mapped column — acc is keyed by `${periodKey}|${wk}` so we
     // accumulate cross-period rows from a single sheet correctly.
@@ -2288,10 +2320,11 @@ function parseSOS_Tab(wb, sheetName, resAll, yr, knownPeriods, currentPeriodKey)
       const v=getCV(ws,r,parseInt(cStr),true);
       if(v<=0)continue;
       const wkKey=periodKey+'|'+wk;
-      if(!acc[cStore][wkKey])acc[cStore][wkKey]={lByDow:new Array(7).fill(0),dByDow:new Array(7).fill(0),bByDow:new Array(7).fill(0),lVals:[],dVals:[],bVals:[]};
+      if(!acc[cStore][wkKey])acc[cStore][wkKey]={lByDow:new Array(7).fill(0),dByDow:new Array(7).fill(0),bByDow:new Array(7).fill(0),tByDow:new Array(7).fill(0),lVals:[],dVals:[],bVals:[],tVals:[]};
       if(isB){acc[cStore][wkKey].bByDow[dow]=v;acc[cStore][wkKey].bVals.push(v);dbg.valuesFound++;}
       if(isL){acc[cStore][wkKey].lByDow[dow]=v;acc[cStore][wkKey].lVals.push(v);dbg.valuesFound++;}
       if(isD){acc[cStore][wkKey].dByDow[dow]=v;acc[cStore][wkKey].dVals.push(v);dbg.valuesFound++;}
+      if(isT){acc[cStore][wkKey].tByDow[dow]=v;acc[cStore][wkKey].tVals.push(v);dbg.valuesFound++;}
     }
   }
   // Diagnose store matching
@@ -2308,14 +2341,15 @@ function parseSOS_Tab(wb, sheetName, resAll, yr, knownPeriods, currentPeriodKey)
       const splitIdx=wkKey.indexOf('|');
       const periodKey=wkKey.slice(0,splitIdx);
       const wk=wkKey.slice(splitIdx+1);
-      const lNZ=d.lVals.filter(v=>v>0),dNZ=d.dVals.filter(v=>v>0),bNZ=(d.bVals||[]).filter(v=>v>0);
+      const lNZ=d.lVals.filter(v=>v>0),dNZ=d.dVals.filter(v=>v>0),bNZ=(d.bVals||[]).filter(v=>v>0),tNZ=(d.tVals||[]).filter(v=>v>0);
       const l=lNZ.length?lNZ.reduce((a,b)=>a+b)/lNZ.length:0;
       const dv=dNZ.length?dNZ.reduce((a,b)=>a+b)/dNZ.length:0;
       const b=bNZ.length?bNZ.reduce((a,b)=>a+b)/bNZ.length:0;
-      if(l>0||dv>0||b>0){
+      const t=tNZ.length?tNZ.reduce((a,b)=>a+b)/tNZ.length:0;
+      if(l>0||dv>0||b>0||t>0){
         if(!byPeriod[periodKey])byPeriod[periodKey]={};
         if(!byPeriod[periodKey][store])byPeriod[periodKey][store]={};
-        byPeriod[periodKey][store][wk]={l,d:dv,b,dl:d.lByDow,dd:d.dByDow,db:d.bByDow||new Array(7).fill(0)};
+        byPeriod[periodKey][store][wk]={l,d:dv,b,t,dl:d.lByDow,dd:d.dByDow,db:d.bByDow||new Array(7).fill(0),dt:d.tByDow||new Array(7).fill(0)};
       }
     }
   }
@@ -2379,6 +2413,19 @@ function showDash(){
 }
 
 function getPD(){return APP.monthly[APP.period]||{}}
+// Labor-with-benefits helper — applies the workbook's Benefits Assumption
+// (default 13.4%) on top of any labor % metric so displays match the daily
+// report's "fully loaded" view.
+const LABOR_PCT_KEYS=new Set(['aLP','alLP','pLP','plLP']);
+function _benefitsFactor(periodKey){
+  const pd=periodKey?APP.monthly[periodKey]:getPD();
+  const f=pd&&pd.benefitsFactor;
+  return(typeof f==='number'&&isFinite(f))?f:0.134;
+}
+function withBenefits(val,mk,periodKey){
+  if(val==null||!LABOR_PCT_KEYS.has(mk))return val;
+  return val*(1+_benefitsFactor(periodKey));
+}
 function getLData(){
   const pd=getPD();
   if(!pd.all)return{};
@@ -3158,7 +3205,7 @@ function _cmpFmtDelta(v,fmt){
   return(v>=0?'+':'')+String(v);
 }
 // Special value calculators for computed metrics (_sV, _sVP, _hV, _acc)
-function _cmpCompute(d,wk,mk){
+function _cmpCompute(d,wk,mk,periodKey){
   if(!d)return 0;
   const _v=x=>(x==null||isNaN(x))?0:x;
   const dy='all'; // for compare, always use full-week/period value
@@ -3167,7 +3214,7 @@ function _cmpCompute(d,wk,mk){
   if(mk==='_hV'){return _v(gv(d,wk,'acH',dy))-_v(gv(d,wk,'scH',dy));}
   if(mk==='_trHV'){const sc=_v(gv(d,wk,'scTrH',dy)),ac=_v(gv(d,wk,'acTrH',dy));return(ac||sc)?ac-sc:0;}
   if(mk==='_acc'){const c=_v(gv(d,wk,'comp',dy)),t=_v(gv(d,wk,'txns',dy));return t>0?c/t*1000:0;}
-  return _v(gv(d,wk,mk,dy));
+  return withBenefits(_v(gv(d,wk,mk,dy)),mk,periodKey);
 }
 // Display label for location code
 function _cmpLocLabel(locKey){
@@ -3271,7 +3318,7 @@ function _cmpColValue(col,mk){
   if(ov!=null&&!isNaN(ov))return ov;
   const d=_cmpAggregateLocs(col.period,col.locs);
   if(!d)return null;
-  const v=_cmpCompute(d,col.week,mk);
+  const v=_cmpCompute(d,col.week,mk,col.period);
   return(v==null||isNaN(v))?null:v;
 }
 // Check whether a value at (col, mk) was supplied via manual override
@@ -3640,7 +3687,8 @@ function update(){
 function updKPI(d,wk,dy){
   const ac=gv(d,wk,'acS',dy),pj=gv(d,wk,'pjS',dy);
   const hasPj=pj>0;const vD=hasPj?ac-pj:0,vP=hasPj?(vD/pj*100):0;
-  const lA=gv(d,wk,'aLP',dy)*100,lP=gv(d,wk,'pLP',dy)*100,haslP=lP>0;
+  const _bf=1+_benefitsFactor(APP.period);
+  const lA=gv(d,wk,'aLP',dy)*100*_bf,lP=gv(d,wk,'pLP',dy)*100*_bf,haslP=lP>0;
   const sp=gv(d,wk,'aSP',dy),spp=gv(d,wk,'pSP',dy);
   const {co,tx,acc}=getAccData(wk,dy);
   const dyLbl=wk==='_period'?'Period':Array.isArray(dy)?DAYS.filter((_,i)=>dy.includes(i)).join('+'):dy==='all'?'Week':'WTD';
@@ -3723,11 +3771,13 @@ function updLaborPlan(d,wk,dy){
 function renderLaborTab(d,wk,dy){
   const wks=getPD().weeks||[];
   const t=APP_lbTab.v;
+  // Labor charts show "fully loaded" % — multiply raw labor by 1 + benefits assumption
+  const _bf=1+_benefitsFactor(APP.period);
   if(t===0){
-    drw('cLP','line',cLabels(wk),[{label:'Projected',data:gda(d,wk,'pLP').map(v=>v*100),borderColor:'rgba(27,42,74,.5)',borderDash:[5,5],pointRadius:4,fill:false,tension:.3},{label:'Actual',data:gda(d,wk,'aLP').map(v=>v*100),borderColor:'#E8432A',pointRadius:4,fill:false,tension:.3}],'%');
+    drw('cLP','line',cLabels(wk),[{label:'Projected',data:gda(d,wk,'pLP').map(v=>v*100*_bf),borderColor:'rgba(27,42,74,.5)',borderDash:[5,5],pointRadius:4,fill:false,tension:.3},{label:'Actual',data:gda(d,wk,'aLP').map(v=>v*100*_bf),borderColor:'#E8432A',pointRadius:4,fill:false,tension:.3}],'%');
     drw('cSP','bar',cLabels(wk),[{label:'Projected',data:gda(d,wk,'pSP'),backgroundColor:'rgba(27,42,74,.15)',borderRadius:4},{label:'Actual',data:gda(d,wk,'aSP'),backgroundColor:'rgba(212,168,67,.7)',borderRadius:4}],'$');
     drw('cHR','bar',cLabels(wk),[{label:'Scheduled',data:gda(getLaborPlanData(),wk,'scH'),backgroundColor:'rgba(27,42,74,.15)',borderRadius:4},{label:'Actual',data:gda(getLaborPlanData(),wk,'acH'),backgroundColor:'rgba(39,174,96,.6)',borderRadius:4}],'');
-    drw('cLT','line',wks,[{label:'Projected',data:wks.map(w=>gv(d,w,'pLP','all')*100),borderColor:'rgba(27,42,74,.5)',borderDash:[5,5],pointRadius:4,fill:false,tension:.3},{label:'Actual',data:wks.map(w=>gv(d,w,'aLP','all')*100),borderColor:'#27AE60',pointRadius:4,fill:false,tension:.3}],'%');
+    drw('cLT','line',wks,[{label:'Projected',data:wks.map(w=>gv(d,w,'pLP','all')*100*_bf),borderColor:'rgba(27,42,74,.5)',borderDash:[5,5],pointRadius:4,fill:false,tension:.3},{label:'Actual',data:wks.map(w=>gv(d,w,'aLP','all')*100*_bf),borderColor:'#27AE60',pointRadius:4,fill:false,tension:.3}],'%');
     document.getElementById('lborTblTitle').textContent='Labor by Store — Excl. Training';
     const laborCols0=[{l:'Store',k:'name'},{l:'Labor % (Excl Tr)',k:'aLP',f:'%'},{l:'Proj %',k:'pLP',f:'%'}];
     if(APP.week!=='_period'&&getPD().weeks&&getPD().weeks.indexOf(wk)>0)laborCols0.push({l:'WoW Δ',k:'_wowL',f:'%wow'});
@@ -3738,12 +3788,12 @@ function renderLaborTab(d,wk,dy){
     const hasAlLP=gda(d,wk,'alLP').some(v=>v>0);
     const ld=getLaborPlanData();
     drw('cALP','line',cLabels(wk),[
-      {label:'All-In Proj',data:gda(d,wk,'plLP').map(v=>v*100),borderColor:'rgba(27,42,74,.5)',borderDash:[5,5],pointRadius:4,fill:false,tension:.3},
-      {label:'All-In Actual',data:gda(d,wk,'alLP').map(v=>v*100),borderColor:'#E8432A',pointRadius:4,fill:false,tension:.3}
+      {label:'All-In Proj',data:gda(d,wk,'plLP').map(v=>v*100*_bf),borderColor:'rgba(27,42,74,.5)',borderDash:[5,5],pointRadius:4,fill:false,tension:.3},
+      {label:'All-In Actual',data:gda(d,wk,'alLP').map(v=>v*100*_bf),borderColor:'#E8432A',pointRadius:4,fill:false,tension:.3}
     ],'%');
     drw('cALC','line',cLabels(wk),[
-      {label:'All-In Labor %',data:gda(d,wk,'alLP').map(v=>v*100),borderColor:'#E8432A',pointRadius:4,fill:false,tension:.3},
-      {label:'Excl. Training %',data:gda(d,wk,'aLP').map(v=>v*100),borderColor:'#1B2A4A',pointRadius:4,fill:false,tension:.3}
+      {label:'All-In Labor %',data:gda(d,wk,'alLP').map(v=>v*100*_bf),borderColor:'#E8432A',pointRadius:4,fill:false,tension:.3},
+      {label:'Excl. Training %',data:gda(d,wk,'aLP').map(v=>v*100*_bf),borderColor:'#1B2A4A',pointRadius:4,fill:false,tension:.3}
     ],'%');
     drw('cAISP','bar',cLabels(wk),[
       {label:'Projected SPLH',data:gda(d,wk,'pSP'),backgroundColor:'rgba(27,42,74,.15)',borderRadius:4},
@@ -3755,9 +3805,9 @@ function renderLaborTab(d,wk,dy){
     ],'');
     // Weekly All-In trend across all weeks
     drw('cAILT','line',wks,[
-      {label:'All-In %',data:wks.map(w=>gv(d,w,'alLP','all')*100),borderColor:'#E8432A',pointRadius:4,fill:false,tension:.3},
-      {label:'Excl. Training %',data:wks.map(w=>gv(d,w,'aLP','all')*100),borderColor:'#1B2A4A',pointRadius:4,fill:false,tension:.3},
-      {label:'All-In Proj %',data:wks.map(w=>gv(d,w,'plLP','all')*100),borderColor:'rgba(27,42,74,.5)',borderDash:[5,5],pointRadius:4,fill:false,tension:.3}
+      {label:'All-In %',data:wks.map(w=>gv(d,w,'alLP','all')*100*_bf),borderColor:'#E8432A',pointRadius:4,fill:false,tension:.3},
+      {label:'Excl. Training %',data:wks.map(w=>gv(d,w,'aLP','all')*100*_bf),borderColor:'#1B2A4A',pointRadius:4,fill:false,tension:.3},
+      {label:'All-In Proj %',data:wks.map(w=>gv(d,w,'plLP','all')*100*_bf),borderColor:'rgba(27,42,74,.5)',borderDash:[5,5],pointRadius:4,fill:false,tension:.3}
     ],'%');
     if(!hasAlLP){
       const el=document.getElementById('lb-sec1');if(el){el.querySelectorAll('.ib').forEach(x=>x.remove());el.insertAdjacentHTML('afterbegin','<div class="ib" style="margin-bottom:14px"><span>ℹ️</span><span>All-In Labor % not found in this report — ensure your Excel includes "Actual Labor % (all in)" rows.</span></div>');}
@@ -4570,8 +4620,13 @@ function updOpsHub(wk,dy){
     } else {
       hrsV=gv(d,wk,'acH',dy)-gv(d,wk,'scH',dy);
     }
-    const labA=gv(d,wk,'aLP',dy);
-    const labP=gv(d,wk,'pLP',dy);
+    // Labor % displays the "fully loaded" rate that the daily report uses:
+    // raw labor % × (1 + benefits assumption) — defaults to 13.4% when the
+    // Instructions sheet didn't supply one. Both actual and projected scale
+    // together so the variance reflects the same world.
+    const _bf=1+_benefitsFactor(APP.period);
+    const labA=gv(d,wk,'aLP',dy)*_bf;
+    const labP=gv(d,wk,'pLP',dy)*_bf;
     const splh=gv(d,wk,'aSP',dy);
     const cars=gv(d,wk,'cars',dy);
     const winB=gv(d,wk,'winB',dy);
@@ -5347,7 +5402,7 @@ function bldTbl(id,wk,dy,cols){
         else if(col.k==='_totTrW'){row[col.k]=gv(d,wk,'nsoW',dy)+gv(d,wk,'regW',dy);}
         else if(col.k==='_acTrH'){const v=gv(d,wk,'acTrH',dy);row[col.k]=v>0?v:gv(d,wk,'nsoH',dy)+gv(d,wk,'regH',dy);}
         else if(col.k==='_trHV'){const sc=gv(d,wk,'scTrH',dy),ac=gv(d,wk,'acTrH',dy)>0?gv(d,wk,'acTrH',dy):gv(d,wk,'nsoH',dy)+gv(d,wk,'regH',dy);row[col.k]=(ac||sc)?ac-sc:0;}
-      } else row[col.k]=gv(d,wk,col.k,dy);
+      } else row[col.k]=withBenefits(gv(d,wk,col.k,dy),col.k,APP.period);
     });
     row._dist=getDist(s);rows.push(row);
   });
