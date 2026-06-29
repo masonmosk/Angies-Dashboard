@@ -3214,7 +3214,9 @@ function _cmpCompute(d,wk,mk,periodKey){
   if(mk==='_hV'){return _v(gv(d,wk,'acH',dy))-_v(gv(d,wk,'scH',dy));}
   if(mk==='_trHV'){const sc=_v(gv(d,wk,'scTrH',dy)),ac=_v(gv(d,wk,'acTrH',dy));return(ac||sc)?ac-sc:0;}
   if(mk==='_acc'){const c=_v(gv(d,wk,'comp',dy)),t=_v(gv(d,wk,'txns',dy));return t>0?c/t*1000:0;}
-  return withBenefits(_v(gv(d,wk,mk,dy)),mk,periodKey);
+  // Labor % weekly cells already include the benefits assumption per the Excel
+  // formula; no additional withBenefits scaling needed here.
+  return _v(gv(d,wk,mk,dy));
 }
 // Display label for location code
 function _cmpLocLabel(locKey){
@@ -3687,8 +3689,9 @@ function update(){
 function updKPI(d,wk,dy){
   const ac=gv(d,wk,'acS',dy),pj=gv(d,wk,'pjS',dy);
   const hasPj=pj>0;const vD=hasPj?ac-pj:0,vP=hasPj?(vD/pj*100):0;
-  const _bf=1+_benefitsFactor(APP.period);
-  const lA=gv(d,wk,'aLP',dy)*100*_bf,lP=gv(d,wk,'pLP',dy)*100*_bf,haslP=lP>0;
+  // Excel's weekly column already multiplies wages by (1 + Benefits Assumption),
+  // so the parsed m.w for aLP/pLP is already "fully loaded".  No extra multiplication here.
+  const lA=gv(d,wk,'aLP',dy)*100,lP=gv(d,wk,'pLP',dy)*100,haslP=lP>0;
   const sp=gv(d,wk,'aSP',dy),spp=gv(d,wk,'pSP',dy);
   const {co,tx,acc}=getAccData(wk,dy);
   const dyLbl=wk==='_period'?'Period':Array.isArray(dy)?DAYS.filter((_,i)=>dy.includes(i)).join('+'):dy==='all'?'Week':'WTD';
@@ -3771,13 +3774,13 @@ function updLaborPlan(d,wk,dy){
 function renderLaborTab(d,wk,dy){
   const wks=getPD().weeks||[];
   const t=APP_lbTab.v;
-  // Labor charts show "fully loaded" % — multiply raw labor by 1 + benefits assumption
-  const _bf=1+_benefitsFactor(APP.period);
+  // Labor charts: parser already reads the fully-loaded weekly % from Excel
+  // (col K = sum(daily wages) × 1.134 / sum(sales)), so chart series use raw values.
   if(t===0){
-    drw('cLP','line',cLabels(wk),[{label:'Projected',data:gda(d,wk,'pLP').map(v=>v*100*_bf),borderColor:'rgba(27,42,74,.5)',borderDash:[5,5],pointRadius:4,fill:false,tension:.3},{label:'Actual',data:gda(d,wk,'aLP').map(v=>v*100*_bf),borderColor:'#E8432A',pointRadius:4,fill:false,tension:.3}],'%');
+    drw('cLP','line',cLabels(wk),[{label:'Projected',data:gda(d,wk,'pLP').map(v=>v*100),borderColor:'rgba(27,42,74,.5)',borderDash:[5,5],pointRadius:4,fill:false,tension:.3},{label:'Actual',data:gda(d,wk,'aLP').map(v=>v*100),borderColor:'#E8432A',pointRadius:4,fill:false,tension:.3}],'%');
     drw('cSP','bar',cLabels(wk),[{label:'Projected',data:gda(d,wk,'pSP'),backgroundColor:'rgba(27,42,74,.15)',borderRadius:4},{label:'Actual',data:gda(d,wk,'aSP'),backgroundColor:'rgba(212,168,67,.7)',borderRadius:4}],'$');
     drw('cHR','bar',cLabels(wk),[{label:'Scheduled',data:gda(getLaborPlanData(),wk,'scH'),backgroundColor:'rgba(27,42,74,.15)',borderRadius:4},{label:'Actual',data:gda(getLaborPlanData(),wk,'acH'),backgroundColor:'rgba(39,174,96,.6)',borderRadius:4}],'');
-    drw('cLT','line',wks,[{label:'Projected',data:wks.map(w=>gv(d,w,'pLP','all')*100*_bf),borderColor:'rgba(27,42,74,.5)',borderDash:[5,5],pointRadius:4,fill:false,tension:.3},{label:'Actual',data:wks.map(w=>gv(d,w,'aLP','all')*100*_bf),borderColor:'#27AE60',pointRadius:4,fill:false,tension:.3}],'%');
+    drw('cLT','line',wks,[{label:'Projected',data:wks.map(w=>gv(d,w,'pLP','all')*100),borderColor:'rgba(27,42,74,.5)',borderDash:[5,5],pointRadius:4,fill:false,tension:.3},{label:'Actual',data:wks.map(w=>gv(d,w,'aLP','all')*100),borderColor:'#27AE60',pointRadius:4,fill:false,tension:.3}],'%');
     document.getElementById('lborTblTitle').textContent='Labor by Store — Excl. Training';
     const laborCols0=[{l:'Store',k:'name'},{l:'Labor % (Excl Tr)',k:'aLP',f:'%'},{l:'Proj %',k:'pLP',f:'%'}];
     if(APP.week!=='_period'&&getPD().weeks&&getPD().weeks.indexOf(wk)>0)laborCols0.push({l:'WoW Δ',k:'_wowL',f:'%wow'});
@@ -3788,12 +3791,12 @@ function renderLaborTab(d,wk,dy){
     const hasAlLP=gda(d,wk,'alLP').some(v=>v>0);
     const ld=getLaborPlanData();
     drw('cALP','line',cLabels(wk),[
-      {label:'All-In Proj',data:gda(d,wk,'plLP').map(v=>v*100*_bf),borderColor:'rgba(27,42,74,.5)',borderDash:[5,5],pointRadius:4,fill:false,tension:.3},
-      {label:'All-In Actual',data:gda(d,wk,'alLP').map(v=>v*100*_bf),borderColor:'#E8432A',pointRadius:4,fill:false,tension:.3}
+      {label:'All-In Proj',data:gda(d,wk,'plLP').map(v=>v*100),borderColor:'rgba(27,42,74,.5)',borderDash:[5,5],pointRadius:4,fill:false,tension:.3},
+      {label:'All-In Actual',data:gda(d,wk,'alLP').map(v=>v*100),borderColor:'#E8432A',pointRadius:4,fill:false,tension:.3}
     ],'%');
     drw('cALC','line',cLabels(wk),[
-      {label:'All-In Labor %',data:gda(d,wk,'alLP').map(v=>v*100*_bf),borderColor:'#E8432A',pointRadius:4,fill:false,tension:.3},
-      {label:'Excl. Training %',data:gda(d,wk,'aLP').map(v=>v*100*_bf),borderColor:'#1B2A4A',pointRadius:4,fill:false,tension:.3}
+      {label:'All-In Labor %',data:gda(d,wk,'alLP').map(v=>v*100),borderColor:'#E8432A',pointRadius:4,fill:false,tension:.3},
+      {label:'Excl. Training %',data:gda(d,wk,'aLP').map(v=>v*100),borderColor:'#1B2A4A',pointRadius:4,fill:false,tension:.3}
     ],'%');
     drw('cAISP','bar',cLabels(wk),[
       {label:'Projected SPLH',data:gda(d,wk,'pSP'),backgroundColor:'rgba(27,42,74,.15)',borderRadius:4},
@@ -3805,9 +3808,9 @@ function renderLaborTab(d,wk,dy){
     ],'');
     // Weekly All-In trend across all weeks
     drw('cAILT','line',wks,[
-      {label:'All-In %',data:wks.map(w=>gv(d,w,'alLP','all')*100*_bf),borderColor:'#E8432A',pointRadius:4,fill:false,tension:.3},
-      {label:'Excl. Training %',data:wks.map(w=>gv(d,w,'aLP','all')*100*_bf),borderColor:'#1B2A4A',pointRadius:4,fill:false,tension:.3},
-      {label:'All-In Proj %',data:wks.map(w=>gv(d,w,'plLP','all')*100*_bf),borderColor:'rgba(27,42,74,.5)',borderDash:[5,5],pointRadius:4,fill:false,tension:.3}
+      {label:'All-In %',data:wks.map(w=>gv(d,w,'alLP','all')*100),borderColor:'#E8432A',pointRadius:4,fill:false,tension:.3},
+      {label:'Excl. Training %',data:wks.map(w=>gv(d,w,'aLP','all')*100),borderColor:'#1B2A4A',pointRadius:4,fill:false,tension:.3},
+      {label:'All-In Proj %',data:wks.map(w=>gv(d,w,'plLP','all')*100),borderColor:'rgba(27,42,74,.5)',borderDash:[5,5],pointRadius:4,fill:false,tension:.3}
     ],'%');
     if(!hasAlLP){
       const el=document.getElementById('lb-sec1');if(el){el.querySelectorAll('.ib').forEach(x=>x.remove());el.insertAdjacentHTML('afterbegin','<div class="ib" style="margin-bottom:14px"><span>ℹ️</span><span>All-In Labor % not found in this report — ensure your Excel includes "Actual Labor % (all in)" rows.</span></div>');}
@@ -4620,13 +4623,11 @@ function updOpsHub(wk,dy){
     } else {
       hrsV=gv(d,wk,'acH',dy)-gv(d,wk,'scH',dy);
     }
-    // Labor % displays the "fully loaded" rate that the daily report uses:
-    // raw labor % × (1 + benefits assumption) — defaults to 13.4% when the
-    // Instructions sheet didn't supply one. Both actual and projected scale
-    // together so the variance reflects the same world.
-    const _bf=1+_benefitsFactor(APP.period);
-    const labA=gv(d,wk,'aLP',dy)*_bf;
-    const labP=gv(d,wk,'pLP',dy)*_bf;
+    // Excel's weekly Labor % cell already has the Benefits Assumption baked in
+    // via the K29/K50 formulas (SUM(daily)*1.134), so the parser's m.w is the
+    // fully-loaded rate.  No additional multiplier here — matches the daily report.
+    const labA=gv(d,wk,'aLP',dy);
+    const labP=gv(d,wk,'pLP',dy);
     const splh=gv(d,wk,'aSP',dy);
     const cars=gv(d,wk,'cars',dy);
     const winB=gv(d,wk,'winB',dy);
@@ -5402,7 +5403,7 @@ function bldTbl(id,wk,dy,cols){
         else if(col.k==='_totTrW'){row[col.k]=gv(d,wk,'nsoW',dy)+gv(d,wk,'regW',dy);}
         else if(col.k==='_acTrH'){const v=gv(d,wk,'acTrH',dy);row[col.k]=v>0?v:gv(d,wk,'nsoH',dy)+gv(d,wk,'regH',dy);}
         else if(col.k==='_trHV'){const sc=gv(d,wk,'scTrH',dy),ac=gv(d,wk,'acTrH',dy)>0?gv(d,wk,'acTrH',dy):gv(d,wk,'nsoH',dy)+gv(d,wk,'regH',dy);row[col.k]=(ac||sc)?ac-sc:0;}
-      } else row[col.k]=withBenefits(gv(d,wk,col.k,dy),col.k,APP.period);
+      } else row[col.k]=gv(d,wk,col.k,dy);
     });
     row._dist=getDist(s);rows.push(row);
   });
