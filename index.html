@@ -2521,13 +2521,24 @@ function gv(data,wk,mk,dy){
   const m=data[wk].m[mk];
   // multi-day array
   if(Array.isArray(dy)){
+    // When the range covers a complete 7-day week and a pre-computed weekly
+    // total exists, prefer it — Excel calculates labor % as a sales-weighted
+    // ratio with benefits applied via the K30/K15 formula, so the daily
+    // equal-weighted average drifts from the daily report's value.
+    if(dy.length===7&&RATE_MK.has(mk)&&m.w)return m.w;
     const vals=dy.map(i=>m.d&&(m.d[+i]||0));
     // For rate metrics (labor %, SOS times) only positives are valid data;
     // for counts/dollars (including COGS variance which can be negative),
     // any non-zero value should count.
     const nz=RATE_MK.has(mk)?vals.filter(v=>v>0):vals.filter(v=>v!==0);
     if(!nz.length)return 0;
-    return RATE_MK.has(mk)?nz.reduce((a,b)=>a+b,0)/nz.length:vals.reduce((a,b)=>a+b,0);
+    let result=RATE_MK.has(mk)?nz.reduce((a,b)=>a+b,0)/nz.length:vals.reduce((a,b)=>a+b,0);
+    // Daily labor % cells are raw (no benefits); only the weekly cell has them
+    // baked in.  For partial-week ranges scale the average so the dashboard's
+    // WTD labor % stays comparable to the daily report (approximate — the
+    // exact sales-weighted value isn't reconstructible from daily ratios alone).
+    if(LABOR_PCT_KEYS&&LABOR_PCT_KEYS.has(mk))result*=(1+_benefitsFactor());
+    return result;
   }
   if(dy==='all'||dy==='wtd'){
     // try weekly total first; if 0, fallback to summing/averaging dailies
@@ -2539,7 +2550,11 @@ function gv(data,wk,mk,dy){
   }
   // Explicit falsy-safe return so negatives (e.g. COGS -$34) pass through
   const dv=m.d&&m.d[+dy];
-  return dv==null?0:dv;
+  if(dv==null)return 0;
+  // Single-day labor % cells are raw — scale by benefits so the dashboard's
+  // single-day view stays consistent with the WTD/weekly "fully loaded" rate.
+  if(LABOR_PCT_KEYS&&LABOR_PCT_KEYS.has(mk))return dv*(1+_benefitsFactor());
+  return dv;
 }
 function gda(data,wk,mk){
   if(wk==='_period'){
