@@ -1074,10 +1074,15 @@ function doSignIn(){
   document.getElementById('signinOv').style.display='none';
   document.getElementById('hdrUser').textContent='👤 '+email;
   document.getElementById('btnSignOut').style.display='inline-block';
-  // Now that auth is confirmed, kick off data restore then load shared reports.
-  // On Supabase mode also bootstrap an anonymous session before the first RPC.
-  if(_backendMode()==='supabase')_sbEnsureSession().catch(()=>{});
-  initDB().then(()=>{ _pullConfigFromServer().then(ch=>{if(ch){renderDL();buildLocSel();}}).catch(()=>{}); loadSharedReports(); }).catch(err=>{console.warn('initDB failed:',err); loadSharedReports();});
+  // Now that auth is confirmed, resolve the effective backend (server override
+  // beats localStorage) and then kick off data restore + shared reports load.
+  (async()=>{
+    await _resolveBackendMode();
+    if(_backendMode()==='supabase')await _sbEnsureSession().catch(()=>{});
+    try{await initDB();}catch(err){console.warn('initDB failed:',err);}
+    try{const ch=await _pullConfigFromServer();if(ch){renderDL();buildLocSel();}}catch(e){}
+    loadSharedReports();
+  })();
 }
 function doSignOut(){
   if(!confirm('Sign out? You will need to re-enter your @angies.com email to access the dashboard.'))return;
@@ -1303,7 +1308,49 @@ function _backendMode(){
 function _setBackendMode(m){
   try{localStorage.setItem(BACKEND_MODE_KEY,m==='supabase'?'supabase':'github');}catch(e){}
 }
+// Write the team-wide backend override to Supabase.  Every client picks this
+// up on next page load via _resolveBackendMode() and switches without needing
+// each user to flip their own toggle.
+async function _setTeamBackend(mode){
+  const m=mode==='supabase'?'supabase':'github';
+  const c=_sbGetClient();
+  if(!c){showToast('⚠ Supabase client not loaded — reload the page and try again.',4000);return;}
+  if(!confirm(`Set the team-wide backend to "${m}"?\n\nEvery teammate will land on this backend on their next refresh. You can rollback from this same panel.`))return;
+  try{
+    await _sbEnsureSession();
+    const email=localStorage.getItem('angies_auth_email')||'unknown@angies.com';
+    const {error}=await c.from('settings').update({backend_mode:m,updated_by:email}).eq('id',1);
+    if(error)throw error;
+    _setBackendMode(m);
+    showToast(`🌐 Team backend set to "${m}". Everyone switches on their next refresh.`,6000);
+    console.log('[Backend] Team default set to',m);
+  }catch(err){
+    console.warn('[Backend] Team override write failed:',err);
+    showToast('⚠ Could not update team backend: '+(err&&err.message),5000);
+  }
+}
 let _sb=null;
+// Cache the server-authoritative backend override so we only fetch it once per
+// page load.  Set via `settings.backend_mode` in the DB; overrides the local
+// flag so a rollout doesn't require every user to flip a toggle.
+let _resolvedBackendModePromise=null;
+function _resolveBackendMode(){
+  if(_resolvedBackendModePromise)return _resolvedBackendModePromise;
+  _resolvedBackendModePromise=(async()=>{
+    try{
+      const c=_sbGetClient();if(!c)return _backendMode();
+      await _sbEnsureSession();
+      const {data}=await c.from('settings').select('backend_mode').eq('id',1).maybeSingle();
+      const override=data&&data.backend_mode;
+      if(override==='supabase'||override==='github'){
+        _setBackendMode(override);
+        return override;
+      }
+    }catch(e){console.warn('[Backend] resolve failed:',e&&e.message);}
+    return _backendMode();
+  })();
+  return _resolvedBackendModePromise;
+}
 function _sbGetClient(){
   if(_sb)return _sb;
   if(typeof supabase==='undefined'||!supabase.createClient)return null;
@@ -5160,11 +5207,15 @@ function renderCfgSettings(){
       </div>
       <div class="sct" style="margin-top:22px">☁ Shared Sync Backend</div>
       <p style="font-size:12px;color:var(--gtxt);margin-bottom:10px;line-height:1.6">Choose where the dashboard reads and writes shared state (districts, week notes, uploaded reports). Change applies to this browser only.</p>
-      <div class="sr"><div><div class="sl">Backend</div><div class="sd">Supabase = row-level updates, no more sync conflicts</div></div>
+      <div class="sr"><div><div class="sl">Backend (this browser)</div><div class="sd">Supabase = row-level updates, no more sync conflicts</div></div>
         <div class="sc2"><select id="backendModeSel" onchange="_setBackendMode(this.value);showToast('Backend: '+this.value+'. Reload the page to switch fully.',5000)">
           <option value="github" ${_backendMode()==='github'?'selected':''}>GitHub (current)</option>
           <option value="supabase" ${_backendMode()==='supabase'?'selected':''}>Supabase (new)</option>
         </select></div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:6px">
+        <button class="bs" style="flex:1;font-size:11px" onclick="_setTeamBackend('supabase')" title="Writes to settings.backend_mode — every teammate lands here on their next refresh">🌐 Make Supabase the team default</button>
+        <button class="bs" style="flex:1;font-size:11px" onclick="_setTeamBackend('github')" title="Rollback: teammates fall back to the GitHub sync path on next refresh">↩ Rollback to GitHub</button>
       </div>
       <p style="font-size:12px;color:var(--gtxt);margin:14px 0 6px;font-weight:600">GitHub Personal Access Token</p>
       <p style="font-size:11px;color:var(--gtxt);margin-bottom:6px">Only used when Backend = GitHub. Needs <strong>repo</strong> scope.</p>
@@ -6156,20 +6207,18 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('signinOv').style.display = 'none';
     document.getElementById('hdrUser').textContent = '👤 ' + stored;
     document.getElementById('btnSignOut').style.display = 'inline-block';
-    // On Supabase mode, bootstrap the anonymous session before any RPC.
-    if (_backendMode() === 'supabase') _sbEnsureSession().catch(() => {});
-    // Restore local data, then pull shared config + reports from the active backend.
-    initDB()
-      .then(() => {
-        _pullConfigFromServer()
-          .then(ch => { if (ch) { renderDL(); buildLocSel(); } })
-          .catch(() => {});
-        loadSharedReports();
-      })
-      .catch(err => {
-        console.warn('[Startup] initDB failed:', err);
-        loadSharedReports();
-      });
+    // Resolve the server-authoritative backend mode BEFORE any read/write so
+    // an incognito or fresh-localStorage client still lands on the shared
+    // backend the team is using.
+    (async () => {
+      await _resolveBackendMode();
+      if (_backendMode() === 'supabase') await _sbEnsureSession().catch(() => {});
+      try { await initDB(); }
+      catch (err) { console.warn('[Startup] initDB failed:', err); }
+      try { const ch = await _pullConfigFromServer(); if (ch) { renderDL(); buildLocSel(); } }
+      catch (e) {}
+      loadSharedReports();
+    })();
   }
 });
 // ─────────────────────────────────────────────────────────────────────────────
