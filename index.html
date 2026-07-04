@@ -10,6 +10,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 :root{--navy:#1B2A4A;--navy-l:#243656;--navy-dk:#131e35;--red:#E8432A;--red-dk:#C73820;--red-lt:#FDE8E4;--gold:#D4A843;--gold-lt:#FDF5E6;--green:#27AE60;--green-lt:#E8F8EF;--bg:#ECEEF2;--bdr:#E1E5EB;--gtxt:#6B7280;--wh:#FFFFFF;--sh:0 4px 16px rgba(27,42,74,.10);--sh-sm:0 2px 8px rgba(27,42,74,.07);--r:12px}
 *{margin:0;padding:0;box-sizing:border-box}
@@ -1073,7 +1074,9 @@ function doSignIn(){
   document.getElementById('signinOv').style.display='none';
   document.getElementById('hdrUser').textContent='👤 '+email;
   document.getElementById('btnSignOut').style.display='inline-block';
-  // Now that auth is confirmed, kick off data restore then load shared reports
+  // Now that auth is confirmed, kick off data restore then load shared reports.
+  // On Supabase mode also bootstrap an anonymous session before the first RPC.
+  if(_backendMode()==='supabase')_sbEnsureSession().catch(()=>{});
   initDB().then(()=>{ _pullConfigFromServer().then(ch=>{if(ch){renderDL();buildLocSel();}}).catch(()=>{}); loadSharedReports(); }).catch(err=>{console.warn('initDB failed:',err); loadSharedReports();});
 }
 function doSignOut(){
@@ -1230,6 +1233,8 @@ function removePeriod(key){
   const remaining=Object.keys(APP.monthly);
   if(APP.period===key)APP.period=remaining.length?remaining[remaining.length-1]:null;
   dbDelete(key).catch(err=>console.warn('DB delete failed',err));
+  // On Supabase mode, also drop the shared server copy (parsed row + raw file)
+  if(_backendMode()==='supabase')_sbDeletePeriod(key).catch(()=>{});
   autoSaveConfig();
   if(!remaining.length){
     document.getElementById('perTabs').innerHTML='';
@@ -1283,6 +1288,42 @@ function autoSaveConfig(){
 // store config and parsed reports as JSON files. Reads are anonymous via
 // raw.githubusercontent.com; writes use a GitHub PAT stored in localStorage.
 const GH_OWNER='masonmosk',GH_REPO='Angies-Dashboard',GH_BRANCH='data';
+
+// ── Supabase shared-storage backend ────────────────────────────────────────
+// Second sync backend built alongside the GitHub one.  Selection is per-client
+// via the BACKEND_MODE flag below; default 'github' so this ships behind a
+// switch and every existing user keeps the current behavior until they opt in.
+const SUPABASE_URL='https://ydskuhhcgcdjhrmmmywg.supabase.co';
+const SUPABASE_KEY='sb_publishable_Er9E1oPyFCFSu64ximI-JA_iEW4oOSo';
+const BACKEND_MODE_KEY='angies_backend_mode';
+function _backendMode(){
+  try{const v=localStorage.getItem(BACKEND_MODE_KEY);return v==='supabase'?'supabase':'github';}
+  catch(e){return 'github';}
+}
+function _setBackendMode(m){
+  try{localStorage.setItem(BACKEND_MODE_KEY,m==='supabase'?'supabase':'github');}catch(e){}
+}
+let _sb=null;
+function _sbGetClient(){
+  if(_sb)return _sb;
+  if(typeof supabase==='undefined'||!supabase.createClient)return null;
+  _sb=supabase.createClient(SUPABASE_URL,SUPABASE_KEY,{
+    auth:{persistSession:true,autoRefreshToken:true,storageKey:'angies_sb_auth'}
+  });
+  return _sb;
+}
+// Sign in anonymously if there's no active session.  Called after the PIN gate
+// clears so RLS-authenticated writes work for the rest of the session.
+async function _sbEnsureSession(){
+  const c=_sbGetClient();if(!c)return null;
+  try{
+    const {data:{session}}=await c.auth.getSession();
+    if(session)return session;
+    const {data,error}=await c.auth.signInAnonymously();
+    if(error){console.warn('[Supabase] signInAnonymously failed:',error.message);return null;}
+    return data.session;
+  }catch(err){console.warn('[Supabase] session setup failed:',err.message);return null;}
+}
 function _ghToken(){return localStorage.getItem('angies_gh_token')||'';}
 let _ghBranchReady=null; // shared promise so we only check/create once
 
@@ -1353,8 +1394,189 @@ async function _ghWrite(path,data,msg){
   return res.json();
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// SUPABASE SYNC — mirror of the GitHub sync surface, row-level under RLS.
+// Every helper here has a 1:1 counterpart in the GitHub layer.  Selection is
+// done by the top of each public entry point (_pushConfigToServer etc.) which
+// dispatches to `_sb*` when `_backendMode()==='supabase'`.
+// ══════════════════════════════════════════════════════════════════════════
+
+async function _sbPushConfig(){
+  const c=_sbGetClient();if(!c){APP._lastPushErr='Supabase client not loaded';return false;}
+  try{
+    await _sbEnsureSession();
+    const email=localStorage.getItem('angies_auth_email')||'unknown@angies.com';
+    const nowIso=new Date().toISOString();
+    // 1) Districts — upsert every current district, then delete rows in the DB
+    //    that are no longer present locally (mirrors GitHub snapshot semantics).
+    const localDistricts=(APP.districts||[]).map((d,i)=>({
+      id:d.id,name:d.name||'',stores:Array.isArray(d.stores)?d.stores:[],
+      sort_order:i,updated_by:email
+    }));
+    if(localDistricts.length){
+      const {error}=await c.from('districts').upsert(localDistricts,{onConflict:'id'});
+      if(error)throw error;
+    }
+    const localIds=new Set((APP.districts||[]).map(d=>d.id));
+    const {data:remoteDists}=await c.from('districts').select('id');
+    const toDel=(remoteDists||[]).filter(r=>!localIds.has(r.id)).map(r=>r.id);
+    if(toDel.length){await c.from('districts').delete().in('id',toDel);}
+    // 2) Singleton settings row
+    {
+      const {error}=await c.from('settings').upsert({
+        id:1,goals:APP.goals||{},labels:APP.labels||{},updated_by:email
+      },{onConflict:'id'});
+      if(error)throw error;
+    }
+    // 3) Week notes — one row per (period_key, week).  Empty/blank notes are
+    //    treated as deletes so a cleared note doesn't stay pinned server-side.
+    const rows=[];const deletes=[];
+    Object.entries(APP.weekNotes||{}).forEach(([k,v])=>{
+      const sep=k.indexOf('::');if(sep<0)return;
+      const period_key=k.slice(0,sep),week=k.slice(sep+2);
+      const txt=(v||'').toString();
+      if(txt.trim())rows.push({period_key,week,note:txt,updated_by:email});
+      else deletes.push({period_key,week});
+    });
+    if(rows.length){const {error}=await c.from('week_notes').upsert(rows,{onConflict:'period_key,week'});if(error)throw error;}
+    for(const d of deletes){await c.from('week_notes').delete().eq('period_key',d.period_key).eq('week',d.week);}
+    APP._lastPushErr=null;
+    APP._lastSyncedAt=nowIso;
+    console.log('[Supabase] Config pushed');
+    return true;
+  }catch(err){
+    APP._lastPushErr=err&&err.message||String(err);
+    console.warn('[Supabase] Config push failed:',APP._lastPushErr);
+    return false;
+  }
+}
+
+async function _sbPullConfig(){
+  const c=_sbGetClient();if(!c)return false;
+  try{
+    await _sbEnsureSession();
+    const [dR,sR,nR]=await Promise.all([
+      c.from('districts').select('*').order('sort_order',{ascending:true}),
+      c.from('settings').select('*').eq('id',1).maybeSingle(),
+      c.from('week_notes').select('*')
+    ]);
+    let changed=false;
+    // Districts — treat server as authoritative (row-level operations mean
+    // conflicts are avoided at the write layer, not merged here).
+    if(dR.data){
+      const serverList=dR.data.map(r=>({id:r.id,name:r.name,stores:r.stores||[]}));
+      if(JSON.stringify(APP.districts||[])!==JSON.stringify(serverList)){
+        APP.districts=serverList;changed=true;
+      }
+    }
+    if(sR.data){
+      const g=sR.data.goals||{},l=sR.data.labels||{};
+      if(Object.keys(g).length){APP.goals=Object.assign({},APP.goals,g);changed=true;}
+      if(Object.keys(l).length){APP.labels=Object.assign({},APP.labels,l);changed=true;}
+    }
+    if(nR.data&&nR.data.length){
+      APP.weekNotes=APP.weekNotes||{};
+      nR.data.forEach(row=>{APP.weekNotes[row.period_key+'::'+row.week]=row.note;});
+      if(typeof _saveWeekNotes==='function')_saveWeekNotes();
+      if(typeof renderWeekNoteBanner==='function')renderWeekNoteBanner();
+      if(document.getElementById('weekNotesEditor')&&typeof _renderWeekNotesEditor==='function')_renderWeekNotesEditor();
+      changed=true;
+    }
+    if(changed){dbSaveConfig().catch(()=>{});console.log('[Supabase] Config pulled');}
+    return changed;
+  }catch(err){console.warn('[Supabase] Config pull failed:',err&&err.message);return false;}
+}
+
+// Strip fields we don't want to send to the server (raw buffers, transient markers).
+function _cleanParsedForServer(parsedData){
+  const clean=JSON.parse(JSON.stringify(parsedData));
+  delete clean.buffer;
+  return clean;
+}
+
+async function _sbPushReport(periodKey,parsedData,rawBuffer,fileName){
+  const c=_sbGetClient();if(!c)return false;
+  try{
+    await _sbEnsureSession();
+    const email=localStorage.getItem('angies_auth_email')||'unknown@angies.com';
+    const clean=_cleanParsedForServer(parsedData);
+    let storage_path=null;
+    // Upload the raw .xlsx to Storage so we can re-parse on demand when PARSE_VER bumps.
+    if(rawBuffer){
+      const safeName=(fileName||periodKey+'.xlsx').replace(/[^a-zA-Z0-9._-]/g,'_');
+      const safeKey=periodKey.replace(/[^a-zA-Z0-9_-]/g,'_');
+      storage_path=`${safeKey}/${new Date().toISOString().replace(/[:.]/g,'-')}-${safeName}`;
+      try{
+        const bytes=rawBuffer instanceof ArrayBuffer?new Uint8Array(rawBuffer):rawBuffer;
+        const {error:upErr}=await c.storage.from('raw-reports').upload(storage_path,bytes,{
+          contentType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          upsert:true
+        });
+        if(upErr){console.warn('[Supabase] raw-reports upload failed (continuing):',upErr.message);storage_path=null;}
+      }catch(e){console.warn('[Supabase] raw upload threw:',e.message);storage_path=null;}
+    }
+    const {error}=await c.from('periods').upsert({
+      key:periodKey,month:clean.month||null,fy:parseInt(clean.key&&(clean.key.match(/FY(\d+)/i)||[])[1])||null,
+      parsed_data:clean,storage_path,file_name:fileName||null,
+      file_size_bytes:rawBuffer?(rawBuffer.byteLength||rawBuffer.length||null):null,
+      parse_ver:clean._v||PARSE_VER,uploaded_by:email
+    },{onConflict:'key'});
+    if(error)throw error;
+    console.log('[Supabase] Report pushed:',periodKey);
+    return true;
+  }catch(err){console.warn('[Supabase] Report push failed:',err&&err.message);return false;}
+}
+
+let _sbSharedLoading=false;
+async function _sbLoadSharedReports(){
+  if(_sbSharedLoading)return;
+  const c=_sbGetClient();if(!c)return;
+  _sbSharedLoading=true;
+  try{
+    await _sbEnsureSession();
+    // Only fetch the metadata + parse-version first so we can skip already-loaded periods.
+    const {data:rows,error}=await c.from('periods').select('key,parse_ver,parsed_data,file_name');
+    if(error)throw error;
+    if(!rows||!rows.length){_sbSharedLoading=false;return;}
+    setLD(1,'Loading shared reports…');
+    let loaded=0;
+    for(const row of rows){
+      try{
+        if(APP.monthly[row.key])continue; // already have it
+        const d=row.parsed_data||{};if(!d.key)continue;
+        d._v=PARSE_VER; // stamp with current version so downstream cache checks pass
+        APP.monthly[d.key]=d;
+        if(d.storeNums)_mergeStoreNums(d);
+        if(!APP.period)APP.period=d.key;
+        dbSave(d.key,null,row.file_name||d.key+'.xlsx',d).catch(()=>{});
+        loaded++;
+        await new Promise(r=>setTimeout(r,0));
+      }catch(err){console.warn('[Supabase] Failed to load',row.key,err);}
+    }
+    if(loaded>0&&Object.keys(APP.monthly).length)showDash();
+    setLD(0);
+    console.log('[Supabase] Shared reports loaded:',loaded,'of',rows.length);
+  }catch(err){console.warn('[Supabase] loadSharedReports error:',err&&err.message);setLD(0);}
+  _sbSharedLoading=false;
+}
+
+async function _sbDeletePeriod(periodKey){
+  const c=_sbGetClient();if(!c)return false;
+  try{
+    await _sbEnsureSession();
+    // Find storage_path so we can also drop the raw file
+    const {data}=await c.from('periods').select('storage_path').eq('key',periodKey).maybeSingle();
+    if(data&&data.storage_path){
+      try{await c.storage.from('raw-reports').remove([data.storage_path]);}catch(e){}
+    }
+    await c.from('periods').delete().eq('key',periodKey);
+    return true;
+  }catch(err){console.warn('[Supabase] Delete period failed:',err&&err.message);return false;}
+}
+
 // ── Push config to GitHub ──
 async function _pushConfigToServer(){
+  if(_backendMode()==='supabase')return _sbPushConfig();
   try{
     if(!_ghToken()){APP._lastPushErr='No GitHub token configured';return false;}
     const email=localStorage.getItem('angies_auth_email')||'unknown@angies.com';
@@ -1373,6 +1595,7 @@ async function _pushConfigToServer(){
 
 // ── Pull config from GitHub and merge ──
 async function _pullConfigFromServer(){
+  if(_backendMode()==='supabase')return _sbPullConfig();
   try{
     const cfg=await _ghRead('config.json');
     if(!cfg)return false;
@@ -1415,7 +1638,8 @@ async function _pullConfigFromServer(){
 }
 
 // ── Push parsed report to GitHub ──
-async function _pushReport(periodKey,parsedData){
+async function _pushReport(periodKey,parsedData,rawBuffer,fileName){
+  if(_backendMode()==='supabase')return _sbPushReport(periodKey,parsedData,rawBuffer,fileName);
   try{
     if(!_ghToken())return false;
     const email=localStorage.getItem('angies_auth_email')||'unknown@angies.com';
@@ -1431,6 +1655,7 @@ async function _pushReport(periodKey,parsedData){
 // ── Pull shared reports from GitHub ──
 let _sharedLoading=false;
 async function loadSharedReports(){
+  if(_backendMode()==='supabase')return _sbLoadSharedReports();
   if(_sharedLoading)return;_sharedLoading=true;
   try{
     const token=_ghToken();
@@ -1642,12 +1867,13 @@ function doFile(f,extra){
       dbSave(d.key,buf,f.name,d)
         .then(()=>updDBBadge(new Date().toISOString()))
         .catch(err=>console.warn('DB save failed',err));
-      // ── GitHub sync: push parsed JSON to shared storage ──
-      if(_ghToken()){
+      // ── Shared-storage sync: push parsed JSON (+ raw buffer on Supabase) ──
+      // Supabase mode syncs unconditionally; GitHub mode still requires a PAT.
+      if(_backendMode()==='supabase'||_ghToken()){
         (async()=>{
           try{
             showToast('☁ Syncing to shared storage…',10000);
-            const ok=await _pushReport(d.key,d);
+            const ok=await _pushReport(d.key,d,buf,f.name);
             if(ok)showToast('☁ Synced — all users can now see this report.',6000);
             else showToast('💾 Saved locally (sync token not set).',4000);
           }catch(err){
@@ -4932,8 +5158,16 @@ function renderCfgSettings(){
         <label class="bs" for="impDI" style="flex:1;text-align:center;cursor:pointer;padding:8px 14px">⬆ Import JSON</label>
         <input type="file" id="impDI" accept=".json">
       </div>
-      <div class="sct" style="margin-top:22px">☁ Shared Sync (GitHub)</div>
-      <p style="font-size:12px;color:var(--gtxt);margin-bottom:10px;line-height:1.6">Enter a GitHub Personal Access Token (PAT) with <strong>repo</strong> scope to enable cross-user sync. Reports and settings will be shared via the repo's <code>data</code> branch.</p>
+      <div class="sct" style="margin-top:22px">☁ Shared Sync Backend</div>
+      <p style="font-size:12px;color:var(--gtxt);margin-bottom:10px;line-height:1.6">Choose where the dashboard reads and writes shared state (districts, week notes, uploaded reports). Change applies to this browser only.</p>
+      <div class="sr"><div><div class="sl">Backend</div><div class="sd">Supabase = row-level updates, no more sync conflicts</div></div>
+        <div class="sc2"><select id="backendModeSel" onchange="_setBackendMode(this.value);showToast('Backend: '+this.value+'. Reload the page to switch fully.',5000)">
+          <option value="github" ${_backendMode()==='github'?'selected':''}>GitHub (current)</option>
+          <option value="supabase" ${_backendMode()==='supabase'?'selected':''}>Supabase (new)</option>
+        </select></div>
+      </div>
+      <p style="font-size:12px;color:var(--gtxt);margin:14px 0 6px;font-weight:600">GitHub Personal Access Token</p>
+      <p style="font-size:11px;color:var(--gtxt);margin-bottom:6px">Only used when Backend = GitHub. Needs <strong>repo</strong> scope.</p>
       <div style="display:flex;gap:8px;align-items:center">
         <input type="password" id="ghTokenInput" placeholder="ghp_..." value="${_ghToken()}" style="flex:1;padding:8px 10px;border:1px solid var(--bdr);border-radius:6px;font-size:12px;font-family:monospace">
         <button class="bp" onclick="localStorage.setItem('angies_gh_token',document.getElementById('ghTokenInput').value.trim());_ghBranchReady=null;showToast(_ghToken()?'☁ Token saved — sync enabled.':'Token cleared — local only.',3000)">Save</button>
@@ -5922,7 +6156,9 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('signinOv').style.display = 'none';
     document.getElementById('hdrUser').textContent = '👤 ' + stored;
     document.getElementById('btnSignOut').style.display = 'inline-block';
-    // Restore local data, then pull shared config + reports from GitHub
+    // On Supabase mode, bootstrap the anonymous session before any RPC.
+    if (_backendMode() === 'supabase') _sbEnsureSession().catch(() => {});
+    // Restore local data, then pull shared config + reports from the active backend.
     initDB()
       .then(() => {
         _pullConfigFromServer()
