@@ -3975,7 +3975,20 @@ function update(){
 
 // KPIs
 function updKPI(d,wk,dy){
-  const ac=gv(d,wk,'acS',dy),pj=gv(d,wk,'pjS',dy);
+  const ac=gv(d,wk,'acS',dy);
+  // Projection is summed only over days where actuals were reported.  Without
+  // this, WTD includes Fri/Sat/Sun's projection but zero actuals, producing a
+  // fake "$-XXK vs proj" gap. Same fix as Ops Hub mets().
+  let pj;
+  if(Array.isArray(dy)){
+    const acD=(d[wk]&&d[wk].m&&d[wk].m.acS&&d[wk].m.acS.d)||[];
+    const pjD=(d[wk]&&d[wk].m&&d[wk].m.pjS&&d[wk].m.pjS.d)||[];
+    let pT=0;
+    dy.forEach(i=>{if((acD[+i]||0)>0)pT+=pjD[+i]||0;});
+    pj=pT;
+  }else{
+    pj=gv(d,wk,'pjS',dy);
+  }
   const hasPj=pj>0;const vD=hasPj?ac-pj:0,vP=hasPj?(vD/pj*100):0;
   // Excel's weekly column already multiplies wages by (1 + Benefits Assumption),
   // so the parsed m.w for aLP/pLP is already "fully loaded".  No extra multiplication here.
