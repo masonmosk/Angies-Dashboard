@@ -832,7 +832,7 @@ const SS=['Baseline','Signal','QC','Ray','Pinnacle','Central','LoneCactus','Tbir
 // Maps alternate Excel tab names → SS store keys (when Angie renames a tab in the workbook)
 const SHEET_ALIAS={'Rural':'Ray','Power':'PowerRay'};
 // Bump this whenever parseWB changes structure so old caches are automatically re-parsed
-const PARSE_VER=25;
+const PARSE_VER=26;
 const TBL_DATA={};
 const EXPORT_METRICS=[
   // Metric order mirrors the Excel AllStores sheet so cross-platform reading is fluid.
@@ -2270,9 +2270,15 @@ function parseSheet(wb,name){
       if(dc&&dc.v==='Monday'){
         wNum++;cWk='Week '+wNum;inCOGS=false;inTraining=false;inAllIn=false;
         const dtc=ws[XLSX.utils.encode_cell({r:r+1,c:3})];
-        let sd='';
-        if(dtc&&typeof dtc.v==='number'&&dtc.v>40000)sd=fmtEDate(dtc.v);
-        wks[cWk]={sd,m:{}};continue;
+        let sd='',sdEpoch=null;
+        if(dtc&&typeof dtc.v==='number'&&dtc.v>40000){
+          sd=fmtEDate(dtc.v);
+          // Preserve the actual epoch so SOS date-column matching doesn't have to
+          // guess the calendar year from mm-dd (that heuristic breaks on July when
+          // the fiscal calendar puts July in the *current* year, not the prior one).
+          sdEpoch=(dtc.v-25569)*86400000;
+        }
+        wks[cWk]={sd,sdEpoch,m:{}};continue;
       }
     }
     if(!cWk)continue;
@@ -2344,7 +2350,15 @@ function parseSOS_Tab(wb, sheetName, resAll, yr, knownPeriods, currentPeriodKey)
   const wkList=[];
   function _addWeeks(periodKey,allObj,periodYr){
     Object.keys(allObj||{}).forEach(wk=>{
-      const sd=allObj[wk]&&allObj[wk].sd;if(!sd)return;
+      const w=allObj[wk];if(!w)return;
+      // Prefer the actual epoch captured when the AllStores date serial was read —
+      // it's unambiguous.  Falling back on the mm-dd + `mm<=6?yr:yr-1` rule breaks
+      // when a fiscal period straddles the July boundary (e.g. Angies FY26 has
+      // Period 7 in July 2026, but the heuristic sends July dates to 2025).
+      if(typeof w.sdEpoch==='number'){
+        wkList.push({periodKey,wk,epoch:w.sdEpoch});return;
+      }
+      const sd=w.sd;if(!sd)return;
       const p=sd.split('-');if(p.length<2)return;
       const mm=parseInt(p[0]),dd=parseInt(p[1]);
       const y=mm<=6?periodYr:periodYr-1;
