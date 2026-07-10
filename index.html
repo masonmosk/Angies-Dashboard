@@ -4974,10 +4974,7 @@ function updOpsHub(wk,dy){
   //   ≤ crit  → yellow / warning (oh-y)
   //   >  crit → red / critical (oh-r)
   // Critical thresholds: DT Breakfast 3:00, DT Lunch/Dinner 2:00, Kiosk B/L/D 8:00.
-  // Menu goals mirror the DT (Window) thresholds until you set dedicated targets —
-  // adjust here + in SOS_GOALS if you want different green/yellow/red bands.
-  const SOS_CRIT={winB:180,winL:120,winD:120,kioB:480,kioL:480,kioD:480,menuB:180,menuL:120,menuD:120};
-  const _MENU_GOALS={menuB:120,menuL:70,menuD:85};
+  const SOS_CRIT={winB:180,winL:120,winD:120,kioB:480,kioL:480,kioD:480};
   function _sosTier(v,goal,crit){if(v<=0)return '';if(v<=goal)return 'oh-g';if(v<=crit)return 'oh-y';return 'oh-r';}
   function cDTB(v){return _sosTier(v,SOS_GOALS.winB,SOS_CRIT.winB);}
   function cDTL(v){return _sosTier(v,SOS_GOALS.winL,SOS_CRIT.winL);}
@@ -4985,9 +4982,10 @@ function updOpsHub(wk,dy){
   function cKB(v){return _sosTier(v,SOS_GOALS.kioB,SOS_CRIT.kioB);}
   function cKL(v){return _sosTier(v,SOS_GOALS.kioL,SOS_CRIT.kioL);}
   function cKD(v){return _sosTier(v,SOS_GOALS.kioD,SOS_CRIT.kioD);}
-  function cMB(v){return _sosTier(v,_MENU_GOALS.menuB,SOS_CRIT.menuB);}
-  function cML(v){return _sosTier(v,_MENU_GOALS.menuL,SOS_CRIT.menuL);}
-  function cMD(v){return _sosTier(v,_MENU_GOALS.menuD,SOS_CRIT.menuD);}
+  // Menu classifiers compare against the daypart's Window time instead of a
+  // fixed goal — green by default, red only when Menu is slower than Window
+  // for that daypart (menu shouldn't take longer than the drive-thru window).
+  function cMvsWin(mv,wv){if(mv<=0)return '';if(wv>0&&mv>wv)return 'oh-r';return 'oh-g';}
   function cAcc(v){return v>=0?(v<=APP.goals.acc?'oh-g':'oh-r'):'';}     // accuracy: <1.0=green
   // COGS variance: only flag in red when absolute variance exceeds $75; otherwise no color.
   function cCG(v){if(v==null||v===0||isNaN(v))return '';return Math.abs(v)>75?'oh-r':'';}
@@ -5035,15 +5033,15 @@ function updOpsHub(wk,dy){
       <td ${ct('labor')}>${fSP(m.splh)}</td>
       <td ${ct('sos')}>${fC(m.cars)}</td>
       <td ${ct('sos')}>${fPof(m.cars,totCars)}</td>
+      <td ${ct('sos',cMvsWin(m.menuB,m.winB))}>${fSOS(m.menuB)}</td>
       <td ${ct('sos',cDTB(m.winB))}>${fSOS(m.winB)}</td>
-      <td ${ct('sos',cDTL(m.winL))}>${fSOS(m.winL)}</td>
-      <td ${ct('sos',cDTD(m.winD))}>${fSOS(m.winD)}</td>
       <td ${ct('sos',cKB(m.kioB))}>${fSOS(m.kioB)}</td>
+      <td ${ct('sos',cMvsWin(m.menuL,m.winL))}>${fSOS(m.menuL)}</td>
+      <td ${ct('sos',cDTL(m.winL))}>${fSOS(m.winL)}</td>
       <td ${ct('sos',cKL(m.kioL))}>${fSOS(m.kioL)}</td>
+      <td ${ct('sos',cMvsWin(m.menuD,m.winD))}>${fSOS(m.menuD)}</td>
+      <td ${ct('sos',cDTD(m.winD))}>${fSOS(m.winD)}</td>
       <td ${ct('sos',cKD(m.kioD))}>${fSOS(m.kioD)}</td>
-      <td ${ct('sos',cMB(m.menuB))}>${fSOS(m.menuB)}</td>
-      <td ${ct('sos',cML(m.menuL))}>${fSOS(m.menuL)}</td>
-      <td ${ct('sos',cMD(m.menuD))}>${fSOS(m.menuD)}</td>
       <td ${ct('acc')}>${fT(m.txns)}</td>
       <td ${ct('acc')}>${fPof(m.txns,totTxns)}</td>
       <td ${ct('acc',cAcc(m.acc1k))}>${fA(m.acc1k)}</td>
@@ -5069,7 +5067,7 @@ function updOpsHub(wk,dy){
     <tr>
       <th class="oh-col">Sales $</th><th class="oh-col">% Mix</th><th class="oh-col">Sales Var $</th>
       <th class="oh-col">Hrs Var</th><th class="oh-col">Labor %</th><th class="oh-col">Labor Var</th><th class="oh-col">SPLH</th>
-      <th class="oh-col">Cars</th><th class="oh-col">%</th><th class="oh-col">DT Bkfst</th><th class="oh-col">DT Lunch</th><th class="oh-col">DT Dinner</th><th class="oh-col">Kiosk Bkfst</th><th class="oh-col">Kiosk Lnch</th><th class="oh-col">Kiosk Dnnr</th><th class="oh-col">Menu Bkfst</th><th class="oh-col">Menu Lnch</th><th class="oh-col">Menu Dnnr</th>
+      <th class="oh-col">Cars</th><th class="oh-col">%</th><th class="oh-col">Menu Bkfst</th><th class="oh-col">DT Bkfst</th><th class="oh-col">Kiosk Bkfst</th><th class="oh-col">Menu Lnch</th><th class="oh-col">DT Lunch</th><th class="oh-col">Kiosk Lnch</th><th class="oh-col">Menu Dnnr</th><th class="oh-col">DT Dinner</th><th class="oh-col">Kiosk Dnnr</th>
       <th class="oh-col">Trans</th><th class="oh-col">%</th><th class="oh-col">Per 1,000</th>
       <th class="oh-col">Lobster</th><th class="oh-col">Chicken</th><th class="oh-col">Steak</th><th class="oh-col">Cheese</th>
     </tr>
