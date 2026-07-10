@@ -4951,6 +4951,9 @@ function updOpsHub(wk,dy){
     const kioB=gv(d,wk,'kioB',dy);
     const kioL=gv(d,wk,'kioL',dy);
     const kioD=gv(d,wk,'kioD',dy);
+    const menuB=gv(d,wk,'menuB',dy);
+    const menuL=gv(d,wk,'menuL',dy);
+    const menuD=gv(d,wk,'menuD',dy);
     const txns=gv(d,wk,'txns',dy);
     const comp=gv(d,wk,'comp',dy);
     const cgL=gv(d,wk,'cgL',dy);
@@ -4959,7 +4962,7 @@ function updOpsHub(wk,dy){
     const cgCh=gv(d,wk,'cgCh',dy);
     const acc1k=txns?comp/txns*1000:0;
     const labVar=labP>0?labA-labP:null;
-    return{sales,salesVar,hrsV,labA,labP,labVar,splh,cars,winB,winL,winD,kioB,kioL,kioD,txns,comp,acc1k,cgL,cgC,cgS,cgCh};
+    return{sales,salesVar,hrsV,labA,labP,labVar,splh,cars,winB,winL,winD,kioB,kioL,kioD,menuB,menuL,menuD,txns,comp,acc1k,cgL,cgC,cgS,cgCh};
   }
 
   // classifiers — strict green/red matching screenshot key
@@ -4971,7 +4974,10 @@ function updOpsHub(wk,dy){
   //   ≤ crit  → yellow / warning (oh-y)
   //   >  crit → red / critical (oh-r)
   // Critical thresholds: DT Breakfast 3:00, DT Lunch/Dinner 2:00, Kiosk B/L/D 8:00.
-  const SOS_CRIT={winB:180,winL:120,winD:120,kioB:480,kioL:480,kioD:480};
+  // Menu goals mirror the DT (Window) thresholds until you set dedicated targets —
+  // adjust here + in SOS_GOALS if you want different green/yellow/red bands.
+  const SOS_CRIT={winB:180,winL:120,winD:120,kioB:480,kioL:480,kioD:480,menuB:180,menuL:120,menuD:120};
+  const _MENU_GOALS={menuB:120,menuL:70,menuD:85};
   function _sosTier(v,goal,crit){if(v<=0)return '';if(v<=goal)return 'oh-g';if(v<=crit)return 'oh-y';return 'oh-r';}
   function cDTB(v){return _sosTier(v,SOS_GOALS.winB,SOS_CRIT.winB);}
   function cDTL(v){return _sosTier(v,SOS_GOALS.winL,SOS_CRIT.winL);}
@@ -4979,6 +4985,9 @@ function updOpsHub(wk,dy){
   function cKB(v){return _sosTier(v,SOS_GOALS.kioB,SOS_CRIT.kioB);}
   function cKL(v){return _sosTier(v,SOS_GOALS.kioL,SOS_CRIT.kioL);}
   function cKD(v){return _sosTier(v,SOS_GOALS.kioD,SOS_CRIT.kioD);}
+  function cMB(v){return _sosTier(v,_MENU_GOALS.menuB,SOS_CRIT.menuB);}
+  function cML(v){return _sosTier(v,_MENU_GOALS.menuL,SOS_CRIT.menuL);}
+  function cMD(v){return _sosTier(v,_MENU_GOALS.menuD,SOS_CRIT.menuD);}
   function cAcc(v){return v>=0?(v<=APP.goals.acc?'oh-g':'oh-r'):'';}     // accuracy: <1.0=green
   // COGS variance: only flag in red when absolute variance exceeds $75; otherwise no color.
   function cCG(v){if(v==null||v===0||isNaN(v))return '';return Math.abs(v)>75?'oh-r':'';}
@@ -4996,7 +5005,7 @@ function updOpsHub(wk,dy){
   function fCG(v){if(!v)return'-';return $FCG(Math.round(v));}
   function fSOS(v){return v>0?tF(v):'-';}
 
-  const NC=23; // total columns (1 name + 3 sales + 4 labor + 8 speed + 3 acc + 4 cogs)
+  const NC=26; // total columns (1 name + 3 sales + 4 labor + 11 speed + 3 acc + 4 cogs)
 
   // row(label, metrics, rowCls, isStore, locKey)
   // locKey: store key ('Pinnacle'), district id ('d_123'), 'AllStores', or null (no click)
@@ -5032,6 +5041,9 @@ function updOpsHub(wk,dy){
       <td ${ct('sos',cKB(m.kioB))}>${fSOS(m.kioB)}</td>
       <td ${ct('sos',cKL(m.kioL))}>${fSOS(m.kioL)}</td>
       <td ${ct('sos',cKD(m.kioD))}>${fSOS(m.kioD)}</td>
+      <td ${ct('sos',cMB(m.menuB))}>${fSOS(m.menuB)}</td>
+      <td ${ct('sos',cML(m.menuL))}>${fSOS(m.menuL)}</td>
+      <td ${ct('sos',cMD(m.menuD))}>${fSOS(m.menuD)}</td>
       <td ${ct('acc')}>${fT(m.txns)}</td>
       <td ${ct('acc')}>${fPof(m.txns,totTxns)}</td>
       <td ${ct('acc',cAcc(m.acc1k))}>${fA(m.acc1k)}</td>
@@ -5050,14 +5062,14 @@ function updOpsHub(wk,dy){
       <th class="oh-ttl" rowspan="2">${dyLbl}</th>
       <th colspan="3" class="oh-sec" style="background:#c04020!important">Sales</th>
       <th colspan="4" class="oh-sec oh-sec-lab">Labor</th>
-      <th colspan="8" class="oh-sec oh-sec-spd">Speed</th>
+      <th colspan="11" class="oh-sec oh-sec-spd">Speed</th>
       <th colspan="3" class="oh-sec oh-sec-acc">Accuracy</th>
       <th colspan="4" class="oh-sec oh-sec-cg">Food Cost</th>
     </tr>
     <tr>
       <th class="oh-col">Sales $</th><th class="oh-col">% Mix</th><th class="oh-col">Sales Var $</th>
       <th class="oh-col">Hrs Var</th><th class="oh-col">Labor %</th><th class="oh-col">Labor Var</th><th class="oh-col">SPLH</th>
-      <th class="oh-col">Cars</th><th class="oh-col">%</th><th class="oh-col">DT Bkfst</th><th class="oh-col">DT Lunch</th><th class="oh-col">DT Dinner</th><th class="oh-col">Kiosk Bkfst</th><th class="oh-col">Kiosk Lnch</th><th class="oh-col">Kiosk Dnnr</th>
+      <th class="oh-col">Cars</th><th class="oh-col">%</th><th class="oh-col">DT Bkfst</th><th class="oh-col">DT Lunch</th><th class="oh-col">DT Dinner</th><th class="oh-col">Kiosk Bkfst</th><th class="oh-col">Kiosk Lnch</th><th class="oh-col">Kiosk Dnnr</th><th class="oh-col">Menu Bkfst</th><th class="oh-col">Menu Lnch</th><th class="oh-col">Menu Dnnr</th>
       <th class="oh-col">Trans</th><th class="oh-col">%</th><th class="oh-col">Per 1,000</th>
       <th class="oh-col">Lobster</th><th class="oh-col">Chicken</th><th class="oh-col">Steak</th><th class="oh-col">Cheese</th>
     </tr>
