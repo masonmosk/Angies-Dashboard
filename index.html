@@ -2223,7 +2223,11 @@ function parseSheet(wb,name){
   const ws=wb.Sheets[name];
   if(!ws||!ws['!ref'])return{};
   const rng=XLSX.utils.decode_range(ws['!ref']);
-  const maxR=Math.min(rng.e.r,499);
+  // Row cap was originally 499 as a safety limit, but workbook growth (extra
+  // week blocks, per-week duplicate anchor headers) has pushed the "Other
+  // Metrics" section past that. Bump to 999 so Wk5+ metrics like Total Cars
+  // and Transactions don't get silently dropped.
+  const maxR=Math.min(rng.e.r,999);
   const wks={};
   let cWk=null,wNum=0,inCOGS=false,inTraining=false,inAllIn=false;
   const MM={'Projected Sales':'pjS','Actual Sales':'acS','Sales Variance':'svD',
