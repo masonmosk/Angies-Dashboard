@@ -1947,6 +1947,15 @@ function extractPeriodNum(str){
   // Standalone "P3", "P4" as a whole word (avoids matching "P30", "P&L", etc.)
   m=str.match(/\bP(\d{1,2})\b/i);
   if(m){const n=parseInt(m[1]);return(n>=1&&n<=13)?n:null;}
+  // Fall back to a calendar month name — Angies' periods map 1:1 to months
+  // (P1=January, P7=July, etc.).  Handles filenames like
+  // "Daily Reporting - 07 July 2026" that omit the period label.
+  m=str.match(/\b(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sept|Sep|Oct|Nov|Dec)\b/i);
+  if(m){
+    const MONTHS={jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,sept:9,oct:10,nov:11,dec:12};
+    const n=MONTHS[m[1].slice(0,3).toLowerCase()];
+    if(n)return n;
+  }
   return null;
 }
 
